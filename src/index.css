@@ -1,0 +1,248 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* S.N.E.C.E.A Design System - Light Mode */
+    --background: 210 20% 96%;
+    --foreground: 210 24% 16%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 210 24% 16%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 24% 16%;
+
+    /* Primary - Bleu profond */
+    --primary: 209 64% 22%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary - Gris clair */
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 210 24% 16%;
+
+    --muted: 210 20% 96%;
+    --muted-foreground: 210 15% 40%;
+
+    --accent: 210 25% 92%;
+    --accent-foreground: 209 64% 22%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 20% 90%;
+    --input: 210 20% 90%;
+    --ring: 209 72% 42%;
+
+    --radius: 0.625rem;
+
+    /* Sidebar */
+    --sidebar-background: 209 45% 16%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-primary: 209 72% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 209 40% 22%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 209 35% 22%;
+    --sidebar-ring: 209 72% 42%;
+
+    /* S.N.E.C.E.A Custom Tokens */
+    /* Urgency colors */
+    --urgency-critical: 0 72% 51%;
+    --urgency-critical-foreground: 0 0% 100%;
+    --urgency-high: 38 92% 50%;
+    --urgency-high-foreground: 0 0% 100%;
+    --urgency-medium: 45 93% 47%;
+    --urgency-medium-foreground: 0 0% 15%;
+    --urgency-low: 210 10% 60%;
+    --urgency-low-foreground: 0 0% 100%;
+
+    /* Status colors */
+    --status-new: 209 72% 42%;
+    --status-new-foreground: 0 0% 100%;
+    --status-info-needed: 270 60% 55%;
+    --status-info-needed-foreground: 0 0% 100%;
+    --status-processing: 38 92% 50%;
+    --status-processing-foreground: 0 0% 100%;
+    --status-hr-escalated: 340 65% 50%;
+    --status-hr-escalated-foreground: 0 0% 100%;
+    --status-resolved: 152 65% 34%;
+    --status-resolved-foreground: 0 0% 100%;
+    --status-closed: 215 20% 40%;
+    --status-closed-foreground: 0 0% 100%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(209, 64%, 22%) 0%, hsl(209, 72%, 42%) 100%);
+    --gradient-sidebar: linear-gradient(180deg, hsl(209, 45%, 16%) 0%, hsl(209, 50%, 12%) 100%);
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 hsl(210 24% 16% / 0.05);
+    --shadow-md: 0 4px 6px -1px hsl(210 24% 16% / 0.08), 0 2px 4px -2px hsl(210 24% 16% / 0.05);
+    --shadow-lg: 0 10px 15px -3px hsl(210 24% 16% / 0.08), 0 4px 6px -4px hsl(210 24% 16% / 0.05);
+    --shadow-card: 0 1px 3px 0 hsl(210 24% 16% / 0.06), 0 1px 2px -1px hsl(210 24% 16% / 0.06);
+  }
+
+  .dark {
+    --background: 210 30% 8%;
+    --foreground: 210 20% 95%;
+
+    --card: 210 30% 12%;
+    --card-foreground: 210 20% 95%;
+
+    --popover: 210 30% 12%;
+    --popover-foreground: 210 20% 95%;
+
+    --primary: 209 72% 42%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 25% 18%;
+    --secondary-foreground: 210 20% 90%;
+
+    --muted: 210 25% 18%;
+    --muted-foreground: 210 15% 55%;
+
+    --accent: 210 30% 20%;
+    --accent-foreground: 210 20% 95%;
+
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 25% 20%;
+    --input: 210 25% 20%;
+    --ring: 209 72% 42%;
+
+    --sidebar-background: 209 45% 10%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-primary: 209 72% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 209 40% 16%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 209 35% 18%;
+    --sidebar-ring: 209 72% 42%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer components {
+  /* Card hover effect */
+  .card-interactive {
+    @apply transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5;
+  }
+
+  /* Badge base styles */
+  .badge-urgency-critical {
+    @apply bg-[hsl(var(--urgency-critical))] text-[hsl(var(--urgency-critical-foreground))];
+  }
+  .badge-urgency-high {
+    @apply bg-[hsl(var(--urgency-high))] text-[hsl(var(--urgency-high-foreground))];
+  }
+  .badge-urgency-medium {
+    @apply bg-[hsl(var(--urgency-medium))] text-[hsl(var(--urgency-medium-foreground))];
+  }
+  .badge-urgency-low {
+    @apply bg-[hsl(var(--urgency-low))] text-[hsl(var(--urgency-low-foreground))];
+  }
+
+  .badge-status-new {
+    @apply bg-[hsl(var(--status-new))] text-[hsl(var(--status-new-foreground))];
+  }
+  .badge-status-info-needed {
+    @apply bg-[hsl(var(--status-info-needed))] text-[hsl(var(--status-info-needed-foreground))];
+  }
+  .badge-status-processing {
+    @apply bg-[hsl(var(--status-processing))] text-[hsl(var(--status-processing-foreground))];
+  }
+  .badge-status-hr-escalated {
+    @apply bg-[hsl(var(--status-hr-escalated))] text-[hsl(var(--status-hr-escalated-foreground))];
+  }
+  .badge-status-resolved {
+    @apply bg-[hsl(var(--status-resolved))] text-[hsl(var(--status-resolved-foreground))];
+  }
+  .badge-status-closed {
+    @apply bg-[hsl(var(--status-closed))] text-[hsl(var(--status-closed-foreground))];
+  }
+
+  /* Sidebar animation */
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sidebar-foreground/80 
+           hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors duration-150;
+  }
+  .sidebar-item-active {
+    @apply bg-sidebar-accent text-sidebar-primary font-medium;
+  }
+
+  /* Form field focus */
+  .input-focus {
+    @apply focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-150;
+  }
+
+  /* Wizard step indicator */
+  .wizard-step {
+    @apply flex items-center justify-center w-10 h-10 rounded-full text-sm font-semibold transition-all duration-200;
+  }
+  .wizard-step-active {
+    @apply bg-primary text-primary-foreground shadow-md;
+  }
+  .wizard-step-completed {
+    @apply bg-[hsl(var(--status-resolved))] text-white;
+  }
+  .wizard-step-pending {
+    @apply bg-muted text-muted-foreground;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Animation utilities */
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  .animate-slide-in-left {
+    animation: slideInLeft 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { 
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to { 
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slideInLeft {
+    from {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}
