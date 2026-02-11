@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
+import RequireAuth from "@/components/auth/RequireAuth";
 import Dashboard from "@/pages/Dashboard";
 import SubmitRequest from "@/pages/SubmitRequest";
 import TicketsList from "@/pages/TicketsList";
@@ -18,6 +19,7 @@ import Reports from "@/pages/Reports";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import NotFound from "@/pages/NotFound";
+import Profile from "@/pages/Profile";
 
 const queryClient = new QueryClient();
 
@@ -33,7 +35,13 @@ const App = () => (
           <Route path="/register" element={<Register />} />
           
           {/* App routes with layout */}
-          <Route element={<AppLayout />}>
+          <Route
+            element={
+              <RequireAuth>
+                <AppLayout />
+              </RequireAuth>
+            }
+          >
             <Route path="/" element={<Dashboard />} />
             <Route path="/submit" element={<SubmitRequest />} />
             <Route path="/tickets" element={<TicketsList />} />
@@ -45,6 +53,7 @@ const App = () => (
             <Route path="/communication" element={<Communication />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/profile" element={<Profile />} />
           </Route>
           
           {/* 404 */}

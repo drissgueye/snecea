@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Search, Phone, Mail, Building2, User } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -10,14 +10,162 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { delegates, companies } from '@/lib/mock-data';
+import { delegates as mockDelegates, companies as mockCompanies } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
+import { apiRequest } from '@/lib/api';
+
+type ApiCompany = {
+  id: number;
+  nom: string;
+  code: string;
+};
+
+type ApiDelegate = {
+  id: number;
+  user_id: number;
+  user_first_name?: string;
+  user_last_name?: string;
+  user_email?: string;
+  entreprise?: {
+    id: number;
+    nom: string;
+    code: string;
+  } | null;
+  telephone?: string;
+  email?: string;
+  is_active?: boolean;
+};
+
+type ApiProfile = {
+  id: number;
+  user_id_read?: number;
+  prenom?: string;
+  nom?: string;
+  email?: string;
+  telephone?: string;
+  role?: string;
+  entreprise?: {
+    id: number;
+    nom: string;
+    code: string;
+  } | null;
+};
 
 export default function Delegates() {
   const [searchQuery, setSearchQuery] = useState('');
   const [companyFilter, setCompanyFilter] = useState('all');
+  const [delegatesList, setDelegatesList] = useState(mockDelegates);
+  const [companiesList, setCompaniesList] = useState(mockCompanies);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const filteredDelegates = delegates.filter((delegate) => {
+  useEffect(() => {
+    const loadCompanies = async () => {
+      try {
+        const data = await apiRequest<{ results: ApiCompany[] }>('/entreprises/', {
+          auth: false,
+        });
+        setCompaniesList(
+          data.results.map((company) => ({
+            id: company.id.toString(),
+            name: company.nom,
+            code: company.code,
+          }))
+        );
+      } catch {
+        setCompaniesList(mockCompanies);
+      }
+    };
+
+    const loadDelegates = async () => {
+      try {
+        const [deleguesRes, profilsRes] = await Promise.all([
+          apiRequest<{ results: ApiDelegate[] }>('/delegues/'),
+          apiRequest<{ results: ApiProfile[] }>('/profils/?role=delegate'),
+        ]);
+
+        const fromDelegues = deleguesRes.results.map((delegate) => {
+          const company = delegate.entreprise
+            ? {
+                id: delegate.entreprise.id.toString(),
+                name: delegate.entreprise.nom,
+                code: delegate.entreprise.code,
+              }
+            : { id: '', name: 'N/A', code: '' };
+          return {
+            id: delegate.id.toString(),
+            userId: delegate.user_id?.toString() ?? '',
+            user: {
+              id: delegate.user_id?.toString() ?? '',
+              firstName: delegate.user_first_name ?? '',
+              lastName: delegate.user_last_name ?? '',
+              email: delegate.user_email ?? delegate.email ?? '',
+              companyId: company.id,
+              role: 'delegate',
+              createdAt: new Date(),
+            },
+            companyId: company.id,
+            company,
+            phone: delegate.telephone ?? '',
+            email: delegate.email ?? delegate.user_email ?? '',
+            isActive: delegate.is_active ?? true,
+          };
+        });
+
+        const fromProfiles = profilsRes.results.map((profile) => {
+          const company = profile.entreprise
+            ? {
+                id: profile.entreprise.id.toString(),
+                name: profile.entreprise.nom,
+                code: profile.entreprise.code,
+              }
+            : { id: '', name: 'N/A', code: '' };
+          const userId = profile.user_id_read?.toString() ?? profile.id.toString();
+          return {
+            id: `profile-${profile.id}`,
+            userId,
+            user: {
+              id: userId,
+              firstName: profile.prenom ?? '',
+              lastName: profile.nom ?? '',
+              email: profile.email ?? '',
+              companyId: company.id,
+              role: 'delegate',
+              createdAt: new Date(),
+            },
+            companyId: company.id,
+            company,
+            phone: profile.telephone ?? '',
+            email: profile.email ?? '',
+            isActive: true,
+          };
+        });
+
+        const merged = [...fromDelegues];
+        const existing = new Set(fromDelegues.map((d) => d.userId || d.email));
+        fromProfiles.forEach((profile) => {
+          const key = profile.userId || profile.email;
+          if (!existing.has(key)) {
+            merged.push(profile);
+            existing.add(key);
+          }
+        });
+
+        setDelegatesList(merged);
+        setErrorMessage(null);
+      } catch {
+        setDelegatesList(mockDelegates);
+        setErrorMessage("Impossible de charger la liste des délégués.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadCompanies();
+    loadDelegates();
+  }, []);
+
+  const filteredDelegates = delegatesList.filter((delegate) => {
     const fullName = `${delegate.user.firstName} ${delegate.user.lastName}`.toLowerCase();
     const matchesSearch = fullName.includes(searchQuery.toLowerCase());
     const matchesCompany = companyFilter === 'all' || delegate.companyId === companyFilter;
@@ -51,7 +199,7 @@ export default function Delegates() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Toutes les compagnies</SelectItem>
-            {companies.map((company) => (
+            {companiesList.map((company) => (
               <SelectItem key={company.id} value={company.id}>
                 {company.name}
               </SelectItem>
@@ -62,7 +210,15 @@ export default function Delegates() {
 
       {/* Delegates Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredDelegates.length === 0 ? (
+        {isLoading ? (
+          <div className="col-span-full text-center py-12 text-muted-foreground">
+            Chargement des délégués...
+          </div>
+        ) : errorMessage ? (
+          <div className="col-span-full text-center py-12 text-destructive">
+            {errorMessage}
+          </div>
+        ) : filteredDelegates.length === 0 ? (
           <div className="col-span-full text-center py-12">
             <User className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
             <p className="text-muted-foreground">Aucun délégué trouvé</p>

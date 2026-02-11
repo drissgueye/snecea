@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { 
   LayoutDashboard, 
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { logout } from '@/lib/auth';
 import {
   Tooltip,
   TooltipContent,
@@ -55,6 +56,15 @@ const bottomNavItems: NavItem[] = [
 export function AppSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      navigate('/login');
+    }
+  };
 
   const isActive = (href: string) => {
     if (href === '/') return location.pathname === '/';
@@ -152,6 +162,7 @@ export function AppSidebar() {
           <TooltipTrigger asChild>
             <button
               className="sidebar-item w-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
+              onClick={handleLogout}
             >
               <LogOut className="w-5 h-5 shrink-0" />
               {!isCollapsed && <span>Déconnexion</span>}

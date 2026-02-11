@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { login } from '@/lib/auth';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -12,7 +13,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
-    email: '',
+    username: '',
     password: '',
   });
 
@@ -20,16 +21,22 @@ export default function Login() {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate login
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    toast({
-      title: 'Connexion réussie',
-      description: 'Bienvenue sur la plateforme SNECEA.',
-    });
-
-    navigate('/');
-    setIsLoading(false);
+    try {
+      await login(formData.username, formData.password);
+      toast({
+        title: 'Connexion réussie',
+        description: 'Bienvenue sur la plateforme SNECEA.',
+      });
+      navigate('/');
+    } catch (error) {
+      toast({
+        title: 'Connexion échouée',
+        description: 'Identifiants invalides ou accès refusé.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -84,13 +91,13 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <Label htmlFor="email">Adresse email</Label>
+              <Label htmlFor="username">Nom d'utilisateur</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="votre.email@example.com"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                id="username"
+                type="text"
+                placeholder="Votre nom d'utilisateur"
+                value={formData.username}
+                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                 required
                 className="mt-1.5"
               />

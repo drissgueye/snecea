@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,13 +12,21 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { companies } from '@/lib/mock-data';
+import { companies as mockCompanies } from '@/lib/mock-data';
+import { apiRequest } from '@/lib/api';
+
+type Company = {
+  id: number;
+  nom: string;
+  code: string;
+};
 
 export default function Register() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [companyOptions, setCompanyOptions] = useState<Company[]>([]);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -28,6 +36,27 @@ export default function Register() {
     password: '',
     confirmPassword: '',
   });
+
+  useEffect(() => {
+    const loadCompanies = async () => {
+      try {
+        const data = await apiRequest<{ results: Company[] }>('/entreprises/', {
+          auth: false,
+        });
+        setCompanyOptions(data.results ?? []);
+      } catch {
+        setCompanyOptions(
+          mockCompanies.map((company) => ({
+            id: Number(company.id),
+            nom: company.name,
+            code: company.code,
+          }))
+        );
+      }
+    };
+
+    loadCompanies();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,16 +72,46 @@ export default function Register() {
 
     setIsLoading(true);
 
-    // Simulate registration
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      await apiRequest('/auth/register/', {
+        method: 'POST',
+        auth: false,
+        body: JSON.stringify({
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          email: formData.email,
+          telephone: formData.phone,
+          entreprise_id: formData.companyId ? Number(formData.companyId) : null,
+          password: formData.password,
+        }),
+      });
 
-    toast({
-      title: 'Compte créé !',
-      description: 'Vous pouvez maintenant vous connecter.',
-    });
+      toast({
+        title: 'Compte créé !',
+        description: 'Vous pouvez maintenant vous connecter.',
+      });
 
-    navigate('/login');
-    setIsLoading(false);
+      navigate('/login');
+    } catch (error: any) {
+      const serverMessage =
+        error?.data?.email?.[0] ||
+        error?.data?.password?.[0] ||
+        error?.data?.first_name?.[0] ||
+        error?.data?.last_name?.[0] ||
+        error?.data?.entreprise_id?.[0] ||
+        error?.data?.non_field_errors?.[0] ||
+        error?.data?.detail ||
+        (error?.data ? JSON.stringify(error.data) : null);
+      toast({
+        title: 'Erreur',
+        description:
+          serverMessage ??
+          "Impossible de créer le compte. Vérifiez vos informations.",
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -156,9 +215,9 @@ export default function Register() {
                   <SelectValue placeholder="Sélectionnez votre compagnie" />
                 </SelectTrigger>
                 <SelectContent>
-                  {companies.map((company) => (
-                    <SelectItem key={company.id} value={company.id}>
-                      {company.name}
+                  {companyOptions.map((company) => (
+                    <SelectItem key={company.id} value={company.id.toString()}>
+                      {company.nom}
                     </SelectItem>
                   ))}
                 </SelectContent>

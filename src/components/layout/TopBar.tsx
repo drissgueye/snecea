@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell, Search, User, ChevronDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,12 +18,57 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { currentUser, notifications } from '@/lib/mock-data';
+import { notifications } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
+import { logout } from '@/lib/auth';
+import { apiRequest, tokenStorage } from '@/lib/api';
+
+type ProfileSummary = {
+  nom?: string;
+  prenom?: string;
+  email?: string;
+  photo?: string;
+};
 
 export function TopBar() {
   const [searchQuery, setSearchQuery] = useState('');
+  const navigate = useNavigate();
   const unreadCount = notifications.filter(n => !n.isRead).length;
+  const [profile, setProfile] = useState<ProfileSummary | null>(null);
+
+  const fileUrl = (value?: string) => {
+    if (!value) {
+      return null;
+    }
+    if (value.startsWith('http')) {
+      return value;
+    }
+    return `http://127.0.0.1:8000${value}`;
+  };
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!tokenStorage.getAccess()) {
+        return;
+      }
+      try {
+        const data = await apiRequest<ProfileSummary>('/profils/me/');
+        setProfile(data);
+      } catch {
+        setProfile(null);
+      }
+    };
+
+    loadProfile();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      navigate('/login');
+    }
+  };
 
   return (
     <header className="h-16 bg-card border-b border-border flex items-center justify-between px-6 sticky top-0 z-30">
@@ -100,15 +146,25 @@ export function TopBar() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-2 px-2">
-              <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                <User className="w-4 h-4 text-primary" />
+              <div className="w-8 h-8 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center">
+                {fileUrl(profile?.photo) ? (
+                  <img
+                    src={fileUrl(profile?.photo) ?? ''}
+                    alt="Profil"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <User className="w-4 h-4 text-primary" />
+                )}
               </div>
               <div className="hidden md:block text-left">
                 <p className="text-sm font-medium leading-none">
-                  {currentUser.firstName} {currentUser.lastName}
+                  {profile?.prenom || profile?.nom
+                    ? `${profile?.prenom ?? ''} ${profile?.nom ?? ''}`.trim()
+                    : 'Utilisateur'}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {currentUser.email}
+                  {profile?.email ?? '—'}
                 </p>
               </div>
               <ChevronDown className="w-4 h-4 text-muted-foreground hidden md:block" />
@@ -117,10 +173,12 @@ export function TopBar() {
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>Mon compte</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Profil</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate('/profile')}>
+              Profil
+            </DropdownMenuItem>
             <DropdownMenuItem>Paramètres</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">
+            <DropdownMenuItem className="text-destructive" onClick={handleLogout}>
               Déconnexion
             </DropdownMenuItem>
           </DropdownMenuContent>

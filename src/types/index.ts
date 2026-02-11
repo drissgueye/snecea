@@ -32,7 +32,7 @@ export interface PoleMember {
   id: string;
   poleId: string;
   userId: string;
-  role: 'head' | 'assistant';
+  role: 'head' | 'assistant' | 'member';
 }
 
 // Delegate
