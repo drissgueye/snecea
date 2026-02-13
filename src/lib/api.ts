@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://158.220.118.172/:8000/api';
+const API_URL = import.meta.env.VITE_API_URL ?? 'https://backendsnecea.labdev-it.com/api';
 
 const ACCESS_TOKEN_KEY = 'cnts.accessToken';
 const REFRESH_TOKEN_KEY = 'cnts.refreshToken';
