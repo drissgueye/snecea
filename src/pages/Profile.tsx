@@ -199,6 +199,15 @@ export default function Profile() {
   }
 
   const entrepriseLabel = profile.entreprise?.nom ?? '—';
+  const roleLabels: Record<string, string> = {
+    admin: 'Administrateur',
+    pole_manager: 'Responsable de pôle',
+    head: 'Chef de pôle (membre)',
+    assistant: 'Assistant de pôle',
+    delegate: 'Délégué',
+    member: 'Membre',
+  };
+  const roleLabel = profile.role ? roleLabels[profile.role] ?? profile.role : '—';
   const fileUrl = (value?: string) => {
     if (!value) {
       return null;
@@ -229,6 +238,11 @@ export default function Profile() {
           <CardTitle>Informations personnelles</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <div className="text-xs text-muted-foreground">Rôle</div>
+            <div className="text-sm font-medium">{roleLabel}</div>
+          </div>
+          <div />
           <div>
             <div className="text-xs text-muted-foreground">Nom</div>
             <Input value={formData?.nom ?? ''} onChange={(e) => handleChange('nom', e.target.value)} />

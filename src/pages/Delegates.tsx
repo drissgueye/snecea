@@ -36,21 +36,6 @@ type ApiDelegate = {
   is_active?: boolean;
 };
 
-type ApiProfile = {
-  id: number;
-  user_id_read?: number;
-  prenom?: string;
-  nom?: string;
-  email?: string;
-  telephone?: string;
-  role?: string;
-  entreprise?: {
-    id: number;
-    nom: string;
-    code: string;
-  } | null;
-};
-
 export default function Delegates() {
   const [searchQuery, setSearchQuery] = useState('');
   const [companyFilter, setCompanyFilter] = useState('all');
@@ -79,12 +64,9 @@ export default function Delegates() {
 
     const loadDelegates = async () => {
       try {
-        const [deleguesRes, profilsRes] = await Promise.all([
-          apiRequest<{ results: ApiDelegate[] }>('/delegues/'),
-          apiRequest<{ results: ApiProfile[] }>('/profils/?role=delegate'),
-        ]);
+        const deleguesRes = await apiRequest<{ results: ApiDelegate[] }>('/delegues/');
 
-        const fromDelegues = deleguesRes.results.map((delegate) => {
+        const list = deleguesRes.results.map((delegate) => {
           const company = delegate.entreprise
             ? {
                 id: delegate.entreprise.id.toString(),
@@ -112,46 +94,7 @@ export default function Delegates() {
           };
         });
 
-        const fromProfiles = profilsRes.results.map((profile) => {
-          const company = profile.entreprise
-            ? {
-                id: profile.entreprise.id.toString(),
-                name: profile.entreprise.nom,
-                code: profile.entreprise.code,
-              }
-            : { id: '', name: 'N/A', code: '' };
-          const userId = profile.user_id_read?.toString() ?? profile.id.toString();
-          return {
-            id: `profile-${profile.id}`,
-            userId,
-            user: {
-              id: userId,
-              firstName: profile.prenom ?? '',
-              lastName: profile.nom ?? '',
-              email: profile.email ?? '',
-              companyId: company.id,
-              role: 'delegate',
-              createdAt: new Date(),
-            },
-            companyId: company.id,
-            company,
-            phone: profile.telephone ?? '',
-            email: profile.email ?? '',
-            isActive: true,
-          };
-        });
-
-        const merged = [...fromDelegues];
-        const existing = new Set(fromDelegues.map((d) => d.userId || d.email));
-        fromProfiles.forEach((profile) => {
-          const key = profile.userId || profile.email;
-          if (!existing.has(key)) {
-            merged.push(profile);
-            existing.add(key);
-          }
-        });
-
-        setDelegatesList(merged);
+        setDelegatesList(list);
         setErrorMessage(null);
       } catch {
         setDelegatesList(mockDelegates);

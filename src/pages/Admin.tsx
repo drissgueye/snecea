@@ -278,7 +278,7 @@ export default function Admin() {
     const loadDelegates = async (usersSource: User[]) => {
       try {
         const data = await apiRequest<{ results: ApiDelegate[] }>('/delegues/');
-        const fromDelegues = data.results.map((delegate) => {
+        const list = data.results.map((delegate) => {
           const user = usersSource.find((u) => u.id === delegate.user_id?.toString());
           const company = delegate.entreprise
             ? {
@@ -306,32 +306,7 @@ export default function Admin() {
             isActive: delegate.is_active ?? true,
           };
         });
-
-        const fromProfiles = usersSource
-          .filter((user) => user.role === 'delegate')
-          .map((user) => ({
-            id: `profile-${user.id}`,
-            userId: user.id,
-            user,
-            companyId: user.companyId,
-            company: companiesList.find((c) => c.id === user.companyId) ?? {
-              id: user.companyId,
-              name: 'N/A',
-              code: '',
-            },
-            phone: user.phone ?? '',
-            email: user.email ?? '',
-            isActive: (user as any).isActive ?? true,
-          }));
-
-        const merged = [...fromDelegues];
-        const existingUserIds = new Set(fromDelegues.map((d) => d.userId));
-        fromProfiles.forEach((profile) => {
-          if (!existingUserIds.has(profile.userId)) {
-            merged.push(profile);
-          }
-        });
-        setDelegatesList(merged);
+        setDelegatesList(list);
       } catch {
         setDelegatesList(delegates);
       }
@@ -501,6 +476,16 @@ export default function Admin() {
         method: 'PATCH',
         body: payload,
       });
+      if (userForm.password && userForm.password.trim()) {
+        try {
+          await apiRequest(`/profils/${editingUser.id}/set-password/`, {
+            method: 'POST',
+            body: JSON.stringify({ new_password: userForm.password }),
+          });
+        } catch {
+          // erreur déjà affichée ou gérée
+        }
+      }
       if (userForm.role === 'delegate' && userForm.companyId) {
         try {
           await apiRequest('/delegues/', {
@@ -965,6 +950,18 @@ export default function Admin() {
                         onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="password">
+                        {editingUser ? 'Nouveau mot de passe (laisser vide pour ne pas changer)' : 'Mot de passe'}
+                      </Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        placeholder={editingUser ? 'Optionnel' : undefined}
+                        value={userForm.password}
+                        onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                      />
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="company">Compagnie</Label>
@@ -1004,17 +1001,6 @@ export default function Admin() {
                         </Select>
                       </div>
                     </div>
-                    {!editingUser && (
-                      <div className="space-y-2">
-                        <Label htmlFor="password">Mot de passe</Label>
-                        <Input
-                          id="password"
-                          type="password"
-                          value={userForm.password}
-                          onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                        />
-                      </div>
-                    )}
                     <div className="flex items-center space-x-2">
                       <Switch
                         id="userActive"
@@ -1904,113 +1890,11 @@ export default function Admin() {
         {/* Delegates Tab */}
         <TabsContent value="delegates">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Délégués</CardTitle>
-                <CardDescription>
-                  {filteredDelegates.length} délégué{filteredDelegates.length > 1 ? 's' : ''} actif{filteredDelegates.length > 1 ? 's' : ''}
-                </CardDescription>
-              </div>
-              <Dialog open={isDelegateDialogOpen} onOpenChange={setIsDelegateDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button onClick={() => setEditingDelegate(null)}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Ajouter
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{editingDelegate ? 'Modifier' : 'Ajouter'} un délégué</DialogTitle>
-                    <DialogDescription>
-                      {editingDelegate ? 'Modifiez les informations du délégué' : 'Désignez un nouveau délégué syndical'}
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="delegateUser">Utilisateur</Label>
-                      <Select
-                        value={delegateForm.userId}
-                        onValueChange={(value) => {
-                          const selected = usersList.find((user) => user.id === value);
-                          setDelegateForm((prev) => ({
-                            ...prev,
-                            userId: value,
-                            email: selected?.email ?? prev.email,
-                            phone: selected?.phone ?? prev.phone,
-                            companyId: selected?.companyId ?? prev.companyId,
-                          }));
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Sélectionner un utilisateur" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {usersList.map(user => (
-                            <SelectItem key={user.id} value={user.id.toString()}>
-                              {user.firstName} {user.lastName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="delegateCompany">Compagnie</Label>
-                      <Select
-                        value={delegateForm.companyId}
-                        onValueChange={(value) => setDelegateForm({ ...delegateForm, companyId: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Sélectionner une compagnie" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {companiesList.map(company => (
-                            <SelectItem key={company.id} value={company.id.toString()}>
-                              {company.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="delegateEmail">Email</Label>
-                        <Input
-                          id="delegateEmail"
-                          type="email"
-                          value={delegateForm.email}
-                          onChange={(e) => setDelegateForm({ ...delegateForm, email: e.target.value })}
-                          disabled={Boolean(delegateForm.userId)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="delegatePhone">Téléphone</Label>
-                        <Input
-                          id="delegatePhone"
-                          value={delegateForm.phone}
-                          onChange={(e) => setDelegateForm({ ...delegateForm, phone: e.target.value })}
-                          disabled={Boolean(delegateForm.userId)}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="delegateActive"
-                        checked={delegateForm.isActive}
-                        onCheckedChange={(value) => setDelegateForm({ ...delegateForm, isActive: value })}
-                      />
-                      <Label htmlFor="delegateActive">Délégué actif</Label>
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsDelegateDialogOpen(false)}>
-                      Annuler
-                    </Button>
-                    <Button onClick={handleSaveDelegate}>
-                      {editingDelegate ? 'Enregistrer' : 'Créer'}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+            <CardHeader>
+              <CardTitle>Délégués</CardTitle>
+              <CardDescription>
+                {filteredDelegates.length} délégué{filteredDelegates.length > 1 ? 's' : ''} actif{filteredDelegates.length > 1 ? 's' : ''}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -2020,7 +1904,6 @@ export default function Admin() {
                     <TableHead>Compagnie</TableHead>
                     <TableHead>Contact</TableHead>
                     <TableHead>Statut</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2052,44 +1935,6 @@ export default function Admin() {
                         }>
                           {delegate.isActive ? 'Actif' : 'Inactif'}
                         </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setEditingDelegate(delegate);
-                              setIsDelegateDialogOpen(true);
-                            }}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Supprimer le délégué ?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Cette action est irréversible. Le délégué {delegate.user.firstName} {delegate.user.lastName} sera définitivement supprimé.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Annuler</AlertDialogCancel>
-                                <AlertDialogAction 
-                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                  onClick={() => handleDeleteDelegate(delegate.id)}
-                                >
-                                  Supprimer
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

@@ -25,6 +25,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useAuthOptional } from "@/contexts/AuthContext";
 
 interface NavItem {
   label: string;
@@ -57,10 +58,17 @@ export function AppSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const auth = useAuthOptional();
+  const userRole = auth?.profile?.role;
+
+  const visibleAdminNavItems = adminNavItems.filter(
+    (item) => !item.roles || (userRole && item.roles.includes(userRole))
+  );
 
   const handleLogout = async () => {
     try {
       await logout();
+      auth?.setProfile(null);
     } finally {
       navigate('/login');
     }
@@ -151,7 +159,7 @@ export function AppSidebar() {
         
         <Separator className="my-4 bg-sidebar-border" />
         
-        {adminNavItems.map(renderNavItem)}
+        {visibleAdminNavItems.map(renderNavItem)}
       </nav>
 
       {/* Bottom section */}
