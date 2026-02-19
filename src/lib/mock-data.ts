@@ -49,7 +49,7 @@ export const users: User[] = [
     lastName: 'Sow',
     email: 'fatou.sow@snecea.sn',
     companyId: '1',
-    role: 'pole_manager',
+    role: 'member',
     createdAt: new Date('2023-06-01'),
   },
   {

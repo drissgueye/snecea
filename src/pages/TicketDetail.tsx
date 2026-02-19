@@ -130,8 +130,8 @@ export default function TicketDetail() {
     () =>
       profile?.role === 'member' ||
       profile?.role === 'delegate' ||
-      profile?.role === 'pole_manager' ||
-      profile?.role === 'admin',
+      profile?.role === 'admin' ||
+      profile?.role === 'super_admin',
     [profile]
   );
 

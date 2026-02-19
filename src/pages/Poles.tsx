@@ -448,9 +448,9 @@ export default function Poles() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="head">Chef de pôle</SelectItem>
-                              <SelectItem value="assistant">Assistant</SelectItem>
-                              <SelectItem value="member">Membre</SelectItem>
+                              <SelectItem value="head">Responsable du pôle</SelectItem>
+                              <SelectItem value="assistant">Adjoint</SelectItem>
+                              <SelectItem value="member">Membre du pôle</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

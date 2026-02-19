@@ -14,10 +14,17 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, tokenStorage } from '@/lib/api';
 
+type PoleMembershipItem = {
+  pole_id: number;
+  pole_nom: string;
+  is_manager: boolean;
+};
+
 type Profile = {
   id: number;
   user: string;
   role: string;
+  poles?: PoleMembershipItem[];
   nom?: string;
   prenom?: string;
   date_naissance?: string;
@@ -200,14 +207,14 @@ export default function Profile() {
 
   const entrepriseLabel = profile.entreprise?.nom ?? '—';
   const roleLabels: Record<string, string> = {
-    admin: 'Administrateur',
-    pole_manager: 'Responsable de pôle',
-    head: 'Chef de pôle (membre)',
-    assistant: 'Assistant de pôle',
-    delegate: 'Délégué',
-    member: 'Membre',
+    super_admin: 'Super Administrateur',
+    admin: 'Administrateur Syndical',
+    delegate: 'Délégué Syndical',
+    member: 'Adhérent',  // rôle global (à ne pas confondre avec « membre d'un pôle »)
+    comptable: 'Comptable',
   };
   const roleLabel = profile.role ? roleLabels[profile.role] ?? profile.role : '—';
+  const polesList = profile.poles ?? [];
   const fileUrl = (value?: string) => {
     if (!value) {
       return null;
@@ -222,7 +229,6 @@ export default function Profile() {
   const pieceIdentiteUrl = fileUrl(profile.piece_identite);
   const contratUrl = fileUrl(profile.contrat_travail);
   const photoIdentiteUrl = fileUrl(profile.photo_identite);
-  const bulletinUrl = fileUrl(profile.dernier_bulletin_salaire);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -233,16 +239,44 @@ export default function Profile() {
         </p>
       </div>
 
+      {/* Bloc Rôle et Appartenance aux pôles — mis en avant */}
+      <Card className="border-primary/40 bg-primary/5 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Rôle et appartenance</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Votre position dans le syndicat et vos pôles.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Rôle</div>
+            <div className="mt-1 text-lg font-semibold text-foreground">{roleLabel}</div>
+          </div>
+          <div className="border-t pt-4">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Appartenance aux pôles</div>
+            {polesList.length === 0 ? (
+              <div className="mt-1 text-sm text-muted-foreground">Aucun pôle</div>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {polesList.map((p) => (
+                  <li key={p.pole_id} className="flex items-center gap-2 text-base">
+                    <span className="font-semibold text-foreground">{p.pole_nom}</span>
+                    <span className="text-muted-foreground">
+                      — {p.is_manager ? 'Responsable du pôle' : 'Membre du pôle'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Informations personnelles</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <div className="text-xs text-muted-foreground">Rôle</div>
-            <div className="text-sm font-medium">{roleLabel}</div>
-          </div>
-          <div />
           <div>
             <div className="text-xs text-muted-foreground">Nom</div>
             <Input value={formData?.nom ?? ''} onChange={(e) => handleChange('nom', e.target.value)} />
@@ -461,15 +495,6 @@ export default function Profile() {
             <Input type="file" onChange={(e) => handleFileChange('photo_identite', e.target.files?.[0] ?? null)} />
             {photoIdentiteUrl && (
               <img src={photoIdentiteUrl} alt="Photo d'identité" className="mt-2 h-24 w-24 rounded object-cover" />
-            )}
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground">Dernier bulletin de salaire</div>
-            <Input type="file" onChange={(e) => handleFileChange('dernier_bulletin_salaire', e.target.files?.[0] ?? null)} />
-            {bulletinUrl && (
-              <a href={bulletinUrl} className="mt-2 block text-sm text-primary hover:underline" target="_blank" rel="noreferrer">
-                Voir le bulletin de salaire
-              </a>
             )}
           </div>
         </CardContent>

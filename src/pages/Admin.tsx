@@ -136,21 +136,19 @@ type ApiDelegate = {
 };
 
 const roleLabels: Record<UserRole, string> = {
-  admin: 'Administrateur',
-  pole_manager: 'Responsable Pôle',
-  head: 'Chef de pôle (membre)',
-  assistant: 'Assistant de pôle',
-  delegate: 'Délégué',
-  member: 'Membre',
+  super_admin: 'Super Administrateur',
+  admin: 'Administrateur Syndical',
+  delegate: 'Délégué Syndical',
+  member: 'Adhérent',  // rôle global
+  comptable: 'Comptable',
 };
 
 const roleBadgeVariants: Record<UserRole, string> = {
+  super_admin: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
   admin: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-  pole_manager: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-  head: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
-  assistant: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400',
   delegate: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   member: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400',
+  comptable: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
 };
 
 export default function Admin() {
@@ -241,6 +239,7 @@ export default function Admin() {
     const loadUsers = async () => {
       try {
         const data = await apiRequest<{ results: ApiProfile[] }>('/profils/');
+        const allowedRoles: UserRole[] = ['super_admin', 'admin', 'delegate', 'member', 'comptable'];
         const mapped = data.results.map((profile) => ({
           id: profile.id.toString(),
           firstName: profile.prenom ?? '',
@@ -248,7 +247,7 @@ export default function Admin() {
           email: profile.email ?? profile.user_email ?? '',
           phone: profile.telephone ?? '',
           companyId: profile.entreprise?.id?.toString() ?? '',
-          role: profile.role ?? 'member',
+          role: (allowedRoles.includes((profile.role ?? '') as UserRole) ? profile.role : 'member') as UserRole,
           isActive: profile.is_active ?? true,
           createdAt: profile.created_at ? new Date(profile.created_at) : new Date(),
         }));
@@ -580,7 +579,7 @@ export default function Admin() {
         email: profile.email ?? user.email,
         phone: profile.telephone ?? user.phone ?? '',
         companyId: profile.entreprise?.id?.toString() ?? user.companyId ?? '',
-        role: profile.role ?? user.role,
+        role: (['super_admin', 'admin', 'delegate', 'member', 'comptable'].includes((profile.role ?? user.role) as UserRole) ? (profile.role ?? user.role) : 'member') as UserRole,
         isActive: profile.is_active ?? true,
         date_naissance: profile.date_naissance ?? '',
         lieu_naissance: profile.lieu_naissance ?? '',
@@ -991,12 +990,11 @@ export default function Admin() {
                             <SelectValue placeholder="Sélectionner" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="admin">Administrateur</SelectItem>
-                            <SelectItem value="pole_manager">Responsable Pôle</SelectItem>
-                            <SelectItem value="head">Chef de pôle (membre)</SelectItem>
-                            <SelectItem value="assistant">Assistant de pôle</SelectItem>
-                            <SelectItem value="delegate">Délégué</SelectItem>
-                            <SelectItem value="member">Membre</SelectItem>
+                            <SelectItem value="super_admin">Super Administrateur</SelectItem>
+                            <SelectItem value="admin">Administrateur Syndical</SelectItem>
+                            <SelectItem value="delegate">Délégué Syndical</SelectItem>
+                            <SelectItem value="member">Adhérent</SelectItem>
+                            <SelectItem value="comptable">Comptable</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

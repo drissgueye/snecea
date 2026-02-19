@@ -66,7 +66,7 @@ export default function SubmitRequest() {
   });
 
   const canSubmitForOthers = useMemo(
-    () => profile?.role === 'admin' || profile?.role === 'delegate',
+    () => profile?.role === 'admin' || profile?.role === 'super_admin' || profile?.role === 'delegate',
     [profile]
   );
   const canClassify = useMemo(
@@ -104,7 +104,7 @@ export default function SubmitRequest() {
         setPoles(polesList);
 
         const canLoadUsers =
-          profileData.role === 'admin' || profileData.role === 'delegate';
+          profileData.role === 'admin' || profileData.role === 'super_admin' || profileData.role === 'delegate';
         if (canLoadUsers) {
           try {
             const profilsData = await apiRequest<{ results: ApiProfile[] }>('/profils/');

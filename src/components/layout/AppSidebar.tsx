@@ -46,8 +46,8 @@ const mainNavItems: NavItem[] = [
 ];
 
 const adminNavItems: NavItem[] = [
-  { label: 'Rapports', icon: BarChart3, href: '/reports', roles: ['admin', 'pole_manager'] },
-  { label: 'Administration', icon: Shield, href: '/admin', roles: ['admin'] },
+  { label: 'Rapports', icon: BarChart3, href: '/reports', roles: ['admin', 'super_admin'] },
+  { label: 'Administration', icon: Shield, href: '/admin', roles: ['admin', 'super_admin'] },
 ];
 
 const bottomNavItems: NavItem[] = [

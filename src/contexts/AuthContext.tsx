@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import type { UserRole } from '@/types';
 
-export type UserRole = 'admin' | 'pole_manager' | 'head' | 'assistant' | 'delegate' | 'member';
+export type { UserRole };
 
 export interface AuthProfile {
   id: number;
@@ -22,7 +23,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       profile,
       setProfile,
-      isAdmin: profile?.role === 'admin',
+      isAdmin: profile?.role === 'admin' || profile?.role === 'super_admin',
     }),
     [profile]
   );
