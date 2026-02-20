@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   ChevronLeft, 
@@ -11,7 +11,8 @@ import {
   Clock,
   CheckCircle2,
   Filter,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,8 +39,49 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { allActivities, type TicketActivity } from '@/lib/activities-data';
+import { getCalendarEvents, type CalendarEvent } from '@/lib/api';
 import type { ActivityType, ActivityStatus } from '@/components/tickets/ActivityTracker';
+
+/** Activité affichée dans le calendrier (réunion API mappée comme activité) */
+interface TicketActivity {
+  id: string;
+  ticketId: string;
+  ticketReference: string;
+  ticketSubject: string;
+  type: ActivityType;
+  title: string;
+  description?: string;
+  scheduledDate: Date;
+  status: ActivityStatus;
+  createdBy?: string;
+  createdAt?: Date;
+}
+
+function mapCalendarEventToActivity(e: CalendarEvent): TicketActivity {
+  const status: ActivityStatus =
+    e.statut === 'TERMINEE' || e.statut === 'completed' ? 'completed'
+      : e.statut === 'ANNULEE' || e.statut === 'cancelled' ? 'cancelled'
+      : 'planned';
+  const isActivite = e.event_type === 'activite';
+  const ticketId = isActivite ? String(e.requete_id ?? '') : String(e.dossier_id ?? '');
+  const ticketReference = (isActivite ? e.numero_reference : e.dossier_numero) ?? '';
+  const type: ActivityType = isActivite
+    ? (e.type_activite === 'call' ? 'call' : e.type_activite === 'document' ? 'document' : e.type_activite === 'note' ? 'note' : 'meeting')
+    : 'meeting';
+  return {
+    id: e.id,
+    ticketId,
+    ticketReference,
+    ticketSubject: e.title,
+    type,
+    title: e.title,
+    description: e.description || (e.lieu ? `Lieu : ${e.lieu}` : undefined),
+    scheduledDate: new Date(e.start),
+    status,
+    createdBy: undefined,
+    createdAt: undefined,
+  };
+}
 
 const activityTypeLabels: Record<ActivityType, string> = {
   call: 'Appel',
@@ -72,6 +114,11 @@ const MONTHS = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
   'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
 ];
+
+/** Clé unique pour regrouper les activités par jour (année-mois-jour en heure locale). */
+function getDateKey(date: Date): string {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
 
 function getDaysInMonth(year: number, month: number): Date[] {
   const firstDay = new Date(year, month, 1);
@@ -118,16 +165,48 @@ export default function Calendar() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
+  // Données calendrier depuis l’API (réunions planifiées)
+  const [activitiesFromApi, setActivitiesFromApi] = useState<TicketActivity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
+
   // Filter state
   const [selectedTypes, setSelectedTypes] = useState<ActivityType[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<ActivityStatus[]>([]);
   const [selectedTicketId, setSelectedTicketId] = useState<string>('all');
 
-  const uniqueTickets = useMemo(() => getUniqueTickets(allActivities), []);
+  // Charger les événements calendrier pour le mois affiché
+  useEffect(() => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0, 23, 59, 59);
+    setLoading(true);
+    setApiError(null);
+    getCalendarEvents({
+      start: start.toISOString(),
+      end: end.toISOString(),
+    })
+      .then((data) => {
+        const events = Array.isArray(data) ? data : (data as { results?: CalendarEvent[] })?.results ?? [];
+        const mapped = events.map(mapCalendarEventToActivity);
+        if (import.meta.env.DEV && events.length > 0) {
+          console.debug('[Calendar] events reçus:', events.length, '→ activités:', mapped.length, mapped);
+        }
+        setActivitiesFromApi(mapped);
+      })
+      .catch((err) => {
+        setActivitiesFromApi([]);
+        setApiError(err?.data?.detail ?? 'Impossible de charger le calendrier');
+      })
+      .finally(() => setLoading(false));
+  }, [currentDate]);
+
+  const uniqueTickets = useMemo(() => getUniqueTickets(activitiesFromApi), [activitiesFromApi]);
 
   // Apply filters
   const filteredActivities = useMemo(() => {
-    return allActivities.filter((activity) => {
+    return activitiesFromApi.filter((activity) => {
       // Type filter
       if (selectedTypes.length > 0 && !selectedTypes.includes(activity.type)) {
         return false;
@@ -170,8 +249,10 @@ export default function Calendar() {
   const activitiesByDate = useMemo(() => {
     const map = new Map<string, TicketActivity[]>();
     filteredActivities.forEach((activity) => {
-      const date = new Date(activity.scheduledDate);
-      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const raw = activity.scheduledDate;
+      const date = raw instanceof Date ? raw : new Date(raw as unknown as string);
+      if (Number.isNaN(date.getTime())) return;
+      const key = getDateKey(date);
       if (!map.has(key)) {
         map.set(key, []);
       }
@@ -181,8 +262,7 @@ export default function Calendar() {
   }, [filteredActivities]);
 
   const getActivitiesForDate = (date: Date): TicketActivity[] => {
-    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-    return activitiesByDate.get(key) || [];
+    return activitiesByDate.get(getDateKey(date)) || [];
   };
 
   const navigateMonth = (direction: 'prev' | 'next') => {
@@ -244,6 +324,11 @@ export default function Calendar() {
           </h1>
           <p className="text-muted-foreground mt-1">
             Vue d'ensemble de toutes les activités planifiées sur l'ensemble des requêtes
+            {!loading && (
+              <span className="ml-2 text-sm">
+                — {activitiesFromApi.length} événement{activitiesFromApi.length !== 1 ? 's' : ''} ce mois
+              </span>
+            )}
           </p>
         </div>
 
@@ -251,10 +336,10 @@ export default function Calendar() {
         <div className="flex items-center gap-2">
           <Select value={selectedTicketId} onValueChange={setSelectedTicketId}>
             <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Toutes les requêtes" />
+              <SelectValue placeholder="Tous les dossiers" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Toutes les requêtes</SelectItem>
+              <SelectItem value="all">Tous les dossiers</SelectItem>
               {uniqueTickets.map((ticket) => (
                 <SelectItem key={ticket.id} value={ticket.id}>
                   {ticket.reference}
@@ -424,12 +509,20 @@ export default function Calendar() {
         </Card>
       </div>
 
+      {/* Message d'erreur API */}
+      {apiError && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {apiError}
+        </div>
+      )}
+
       {/* Calendar */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">
+            <CardTitle className="text-lg flex items-center gap-2">
               {MONTHS[currentDate.getMonth()]} {currentDate.getFullYear()}
+              {loading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
             </CardTitle>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={goToToday}>
@@ -470,7 +563,7 @@ export default function Calendar() {
           </div>
 
           {/* Calendar grid */}
-          <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden">
+          <div className={cn('grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden', loading && 'opacity-60 pointer-events-none')}>
             {days.map((date, index) => {
               const activities = getActivitiesForDate(date);
               const hasActivities = activities.length > 0;
@@ -603,7 +696,7 @@ export default function Calendar() {
                       onClick={() => setIsDialogOpen(false)}
                     >
                       <FileText className="w-3 h-3" />
-                      {activity.ticketReference} - {activity.ticketSubject}
+                      Dossier {activity.ticketReference}
                     </Link>
                     {activity.comment && (
                       <div className="mt-2 p-2 rounded bg-background text-sm">

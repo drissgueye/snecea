@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   Phone, 
   CalendarCheck, 
@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { apiRequest, getRequeteActivites, createRequeteActivite } from '@/lib/api';
 
 export type ActivityType = 'call' | 'meeting' | 'document' | 'note';
 export type ActivityStatus = 'planned' | 'completed' | 'cancelled';
@@ -75,6 +75,8 @@ const statusLabels: Record<ActivityStatus, string> = {
   cancelled: 'Annulé',
 };
 
+const INITIAL_ACTIVITIES: Activity[] = [];
+
 interface ActivityTrackerProps {
   ticketId: string;
   ticketReference?: string;
@@ -84,31 +86,18 @@ interface ActivityTrackerProps {
   canManage: boolean;
 }
 
-// Mock activities data
-const mockActivities: Activity[] = [
-  {
-    id: '1',
-    type: 'call',
-    title: 'Appel avec les RH',
-    description: 'Premier contact avec le service RH pour discuter du dossier',
-    scheduledDate: new Date('2026-01-27'),
-    completedDate: new Date('2026-01-27'),
-    status: 'completed',
-    comment: 'RH a confirmé la réception du dossier. En attente de réponse sous 48h.',
-    createdBy: 'Fatou Sow',
-    createdAt: new Date('2026-01-26'),
-  },
-  {
-    id: '2',
-    type: 'meeting',
-    title: 'Réunion tripartite',
-    description: 'Réunion avec l\'employé, le délégué et les RH',
-    scheduledDate: new Date('2026-02-03'),
-    status: 'planned',
-    createdBy: 'Fatou Sow',
-    createdAt: new Date('2026-01-27'),
-  },
-];
+/** Entrée d'historique renvoyée par l'API (HistoriqueAction). */
+export type HistoriqueEntry = {
+  id: number;
+  action: string;
+  action_display: string;
+  utilisateur_display: string;
+  commentaire: string | null;
+  champ_modifie: string | null;
+  ancienne_valeur: string | null;
+  nouvelle_valeur: string | null;
+  timestamp: string;
+};
 
 export function ActivityTracker({ 
   ticketId, 
@@ -119,12 +108,59 @@ export function ActivityTracker({
   canManage 
 }: ActivityTrackerProps) {
   const { toast } = useToast();
-  const [activities, setActivities] = useState<Activity[]>(mockActivities);
+  const [historique, setHistorique] = useState<HistoriqueEntry[]>([]);
+  const [historiqueLoading, setHistoriqueLoading] = useState(true);
+  const [activities, setActivities] = useState<Activity[]>(INITIAL_ACTIVITIES);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [isCompletingActivity, setIsCompletingActivity] = useState(false);
   const [isSendingNotification, setIsSendingNotification] = useState(false);
   
+  // Charger l'historique des actions depuis l'API
+  useEffect(() => {
+    if (!ticketId) return;
+    let cancelled = false;
+    setHistoriqueLoading(true);
+    apiRequest<HistoriqueEntry[]>(`/requetes/${ticketId}/historique/`)
+      .then((data) => {
+        if (!cancelled) setHistorique(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setHistorique([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoriqueLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [ticketId]);
+
+  // Charger les activités planifiées depuis l'API (affichées dans le calendrier)
+  useEffect(() => {
+    if (!ticketId) return;
+    let cancelled = false;
+    getRequeteActivites(ticketId)
+      .then((data) => {
+        if (cancelled) return;
+        const mapped: Activity[] = (Array.isArray(data) ? data : []).map((a) => ({
+          id: String(a.id),
+          type: a.type_activite as ActivityType,
+          title: a.titre,
+          description: a.description || undefined,
+          scheduledDate: new Date(a.date_planifiee),
+          completedDate: a.date_realisation ? new Date(a.date_realisation) : undefined,
+          status: a.statut as ActivityStatus,
+          comment: a.commentaire || undefined,
+          createdBy: '',
+          createdAt: new Date(a.created_at),
+        }));
+        setActivities(mapped);
+      })
+      .catch(() => {
+        if (!cancelled) setActivities([]);
+      });
+    return () => { cancelled = true; };
+  }, [ticketId]);
+
   // New activity form state
   const [newActivity, setNewActivity] = useState({
     type: 'call' as ActivityType,
@@ -140,53 +176,18 @@ export function ActivityTracker({
   });
 
   const sendActivityNotification = async (
-    activityType: ActivityType,
-    activityTitle: string,
-    activityDate: string,
-    notificationType: 'planned' | 'completed',
-    completionComment?: string
+    _activityType: ActivityType,
+    _activityTitle: string,
+    _activityDate: string,
+    _notificationType: 'planned' | 'completed',
+    _completionComment?: string
   ) => {
-    if (!recipientEmail) {
-      console.log('No recipient email provided, skipping notification');
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase.functions.invoke('send-activity-notification', {
-        body: {
-          recipientEmail,
-          recipientName: recipientName || '',
-          ticketReference,
-          ticketSubject,
-          activityType,
-          activityTitle,
-          activityDate,
-          notificationType,
-          completionComment,
-        },
-      });
-
-      if (error) {
-        console.error('Error sending notification:', error);
-        toast({
-          title: 'Notification non envoyée',
-          description: 'L\'email de notification n\'a pas pu être envoyé.',
-          variant: 'destructive',
-        });
-      } else {
-        console.log('Notification sent:', data);
-        toast({
-          title: 'Notification envoyée',
-          description: `L'adhérent a été notifié par email.`,
-        });
-      }
-    } catch (err) {
-      console.error('Error calling notification function:', err);
-    }
+    if (!recipientEmail) return;
+    // Notification par email : à brancher sur le backend (ex. Django email) si besoin
   };
 
   const handleAddActivity = async () => {
-    if (!newActivity.title || !newActivity.scheduledDate) {
+    if (!newActivity.title || !newActivity.scheduledDate || !ticketId) {
       toast({
         title: 'Champs requis',
         description: 'Veuillez remplir le titre et la date.',
@@ -196,36 +197,45 @@ export function ActivityTracker({
     }
 
     setIsSendingNotification(true);
-
-    const activity: Activity = {
-      id: Date.now().toString(),
-      type: newActivity.type,
-      title: newActivity.title,
-      description: newActivity.description,
-      scheduledDate: new Date(newActivity.scheduledDate),
-      status: 'planned',
-      createdBy: 'Utilisateur actuel',
-      createdAt: new Date(),
-    };
-
-    setActivities([activity, ...activities]);
-    setNewActivity({ type: 'call', title: '', description: '', scheduledDate: '' });
-    setIsDialogOpen(false);
-    
-    // Send email notification
-    await sendActivityNotification(
-      activity.type,
-      activity.title,
-      activity.scheduledDate.toISOString(),
-      'planned'
-    );
-
-    setIsSendingNotification(false);
-    
-    toast({
-      title: 'Activité ajoutée',
-      description: 'L\'activité a été planifiée avec succès.',
-    });
+    try {
+      const created = await createRequeteActivite(ticketId, {
+        type_activite: newActivity.type,
+        titre: newActivity.title,
+        description: newActivity.description || '',
+        date_planifiee: new Date(newActivity.scheduledDate).toISOString(),
+      });
+      const activity: Activity = {
+        id: String(created.id),
+        type: created.type_activite as ActivityType,
+        title: created.titre,
+        description: created.description || undefined,
+        scheduledDate: new Date(created.date_planifiee),
+        status: (created.statut as ActivityStatus) || 'planned',
+        createdBy: '',
+        createdAt: new Date(created.created_at),
+      };
+      setActivities([activity, ...activities]);
+      setNewActivity({ type: 'call', title: '', description: '', scheduledDate: '' });
+      setIsDialogOpen(false);
+      await sendActivityNotification(
+        activity.type,
+        activity.title,
+        activity.scheduledDate.toISOString(),
+        'planned'
+      );
+      toast({
+        title: 'Activité ajoutée',
+        description: "L'activité a été planifiée. Elle s'affichera dans le calendrier.",
+      });
+    } catch (err) {
+      toast({
+        title: 'Erreur',
+        description: (err as { data?: { detail?: string } })?.data?.detail ?? "Impossible d'ajouter l'activité.",
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSendingNotification(false);
+    }
   };
 
   const handleCompleteActivity = async () => {
@@ -289,7 +299,7 @@ export function ActivityTracker({
         <div className="flex items-center gap-2">
           <CalendarCheck className="w-5 h-5 text-primary" />
           <h3 className="font-semibold">Suivi des activités</h3>
-          <Badge variant="secondary">{activities.length}</Badge>
+          <Badge variant="secondary">{historique.length + activities.length}</Badge>
         </div>
         
         {canManage && (
@@ -446,9 +456,70 @@ export function ActivityTracker({
       </Dialog>
 
       <div className="p-4 space-y-4">
+        {/* Historique des actions (API) */}
+        <div>
+          <h4 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+            <FileText className="w-4 h-4" />
+            Historique des actions
+          </h4>
+          {historiqueLoading ? (
+            <p className="text-sm text-muted-foreground py-4">Chargement...</p>
+          ) : historique.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">
+              Aucune action enregistrée pour le moment.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {historique.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="p-3 rounded-lg border border-border bg-muted/20 text-sm"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-medium text-primary">
+                      {entry.action_display}
+                    </span>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {new Date(entry.timestamp).toLocaleDateString('fr-FR', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                  {entry.utilisateur_display && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      par {entry.utilisateur_display}
+                    </p>
+                  )}
+                  {entry.commentaire && (
+                    <p className="mt-2 text-muted-foreground">{entry.commentaire}</p>
+                  )}
+                  {(entry.ancienne_valeur || entry.nouvelle_valeur) && (
+                    <p className="text-xs mt-1 text-muted-foreground">
+                      {entry.ancienne_valeur && (
+                        <span>Ancien : {entry.ancienne_valeur}</span>
+                      )}
+                      {entry.ancienne_valeur && entry.nouvelle_valeur && ' → '}
+                      {entry.nouvelle_valeur && (
+                        <span>Nouveau : {entry.nouvelle_valeur}</span>
+                      )}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* Activités planifiées (locales, à terme reliées au backend) */}
         {activities.length === 0 ? (
-          <p className="text-center text-muted-foreground py-6">
-            Aucune activité planifiée
+          <p className="text-center text-muted-foreground py-4 text-sm">
+            Aucune activité planifiée. Utilisez « Ajouter » pour en créer une (enregistrement local).
           </p>
         ) : (
           <>

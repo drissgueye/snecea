@@ -1,5 +1,17 @@
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api';
 
+/** Base URL du backend (sans /api) pour les médias (pièces jointes, etc.) */
+export const MEDIA_BASE_URL =
+  (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api').replace(/\/api\/?$/, '') ||
+  'http://127.0.0.1:8000';
+
+/** Construit l'URL complète d'un fichier média (pièce jointe, photo, etc.) */
+export function getMediaUrl(path: string | null | undefined): string {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  return `${MEDIA_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 const ACCESS_TOKEN_KEY = 'cnts.accessToken';
 const REFRESH_TOKEN_KEY = 'cnts.refreshToken';
 
@@ -92,4 +104,108 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   return (await response.json()) as T;
+}
+
+/** Événement calendrier (réunion planifiée) renvoyé par l’API */
+export interface CalendarEvent {
+  id: string;
+  event_type?: 'reunion' | 'activite';
+  title: string;
+  start: string;
+  end: string;
+  statut: string;
+  statut_display: string;
+  type_reunion?: string;
+  type_reunion_display?: string;
+  dossier_id?: number;
+  dossier_numero?: string;
+  lieu?: string;
+  ordre_du_jour?: string;
+  reunion_id?: number;
+  type_activite?: string;
+  type_activite_display?: string;
+  requete_id?: number;
+  numero_reference?: string;
+  description?: string;
+  activite_id?: number;
+}
+
+/**
+ * Récupère les événements calendrier (réunions planifiées) pour une plage de dates.
+ * Utilisé par la page /calendar pour afficher les réunions issues du traitement des requêtes.
+ */
+export async function getCalendarEvents(params: {
+  start: string;
+  end: string;
+}): Promise<CalendarEvent[]> {
+  const sp = new URLSearchParams({ start: params.start, end: params.end });
+  return apiRequest<CalendarEvent[]>(`/reunions/calendar-events/?${sp.toString()}`);
+}
+
+/** Activité planifiée sur une requête (suivi d'activités, date affichée au calendrier) */
+export interface ActiviteRequeteDto {
+  id: number;
+  requete_id: number;
+  type_activite: string;
+  titre: string;
+  description: string;
+  date_planifiee: string;
+  statut: string;
+  date_realisation: string | null;
+  commentaire: string;
+  created_by_id?: number;
+  created_at: string;
+}
+
+export async function getRequeteActivites(requeteId: string): Promise<ActiviteRequeteDto[]> {
+  return apiRequest<ActiviteRequeteDto[]>(`/requetes/${requeteId}/activites/`);
+}
+
+export async function createRequeteActivite(
+  requeteId: string,
+  data: { type_activite: string; titre: string; description?: string; date_planifiee: string }
+): Promise<ActiviteRequeteDto> {
+  return apiRequest<ActiviteRequeteDto>(`/requetes/${requeteId}/activites/`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Télécharge un fichier (ex. PDF) avec authentification et déclenche le téléchargement côté client.
+ */
+export async function downloadFile(
+  path: string,
+  filename: string,
+  options: { method?: string } = {}
+): Promise<void> {
+  const url = `${API_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  const headers = new Headers();
+  const access = tokenStorage.getAccess();
+  if (access) headers.set('Authorization', `Bearer ${access}`);
+  const response = await fetch(url, { method: options.method ?? 'GET', headers });
+  if (response.status === 401) {
+    const newAccess = await refreshAccessToken();
+    if (newAccess) {
+      headers.set('Authorization', `Bearer ${newAccess}`);
+      const retry = await fetch(url, { method: options.method ?? 'GET', headers });
+      if (!retry.ok) throw { status: retry.status, data: await retry.json().catch(() => ({})) } as ApiError;
+      const blob = await retry.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+      return;
+    }
+  }
+  if (!response.ok) throw { status: response.status, data: await response.json().catch(() => ({})) } as ApiError;
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(blobUrl);
 }

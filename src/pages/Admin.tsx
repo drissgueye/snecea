@@ -485,22 +485,6 @@ export default function Admin() {
           // erreur déjà affichée ou gérée
         }
       }
-      if (userForm.role === 'delegate' && userForm.companyId) {
-        try {
-          await apiRequest('/delegues/', {
-            method: 'POST',
-            body: JSON.stringify({
-              user_id: Number(editingUser.id),
-              entreprise_id: Number(userForm.companyId),
-              email: userForm.email,
-              telephone: userForm.phone,
-              is_active: true,
-            }),
-          });
-        } catch {
-          // ignore if already exists
-        }
-      }
       setUsersList((prev) =>
         prev.map((user) =>
           user.id === editingUser.id
@@ -533,22 +517,6 @@ export default function Admin() {
           is_active: userForm.isActive,
         }),
       });
-      if (userForm.role === 'delegate' && userForm.companyId) {
-        try {
-          await apiRequest('/delegues/', {
-            method: 'POST',
-            body: JSON.stringify({
-              user_id: created.id,
-              entreprise_id: Number(userForm.companyId),
-              email: userForm.email,
-              telephone: userForm.phone,
-              is_active: true,
-            }),
-          });
-        } catch {
-          // ignore if already exists
-        }
-      }
       setUsersList((prev) => [
         ...prev,
         {

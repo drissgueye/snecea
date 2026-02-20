@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -11,6 +11,7 @@ import {
   User,
   Users,
   FileText,
+  FileDown,
   CheckCircle2,
   Tag,
   AlertTriangle
@@ -29,7 +30,7 @@ import { ticketTypeLabels, urgencyLabels, statusLabels } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 import type { TicketStatus, TicketType, TicketUrgency } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { apiRequest } from '@/lib/api';
+import { apiRequest, downloadFile, getMediaUrl } from '@/lib/api';
 import {
   Select,
   SelectContent,
@@ -37,6 +38,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Zap } from 'lucide-react';
 
 const statusSteps: TicketStatus[] = [
   'new',
@@ -65,6 +76,19 @@ type ApiTicket = {
   pole?: { id: number; nom: string } | null;
   entreprise?: { id: number; nom: string } | null;
   delegue_syndical?: string | null;
+  delegue_syndical_id_read?: number | null;
+  dossier?: string | null;
+  dossier_id?: number | null;
+  date_cloture?: string | null;
+  compte_rendu?: string | null;
+};
+
+type ApiMaquetteCompteRendu = {
+  id: number;
+  nom: string;
+  contenu: string;
+  is_default: boolean;
+  ordre: number;
 };
 
 type ApiPieceJointe = {
@@ -87,6 +111,35 @@ type ApiProfile = {
   role: string;
 };
 
+type PoleActionItem = {
+  id: string;
+  label: string;
+  description: string;
+  required_fields: string[];
+  optional_fields: string[];
+};
+
+type PoleActionsResponse = {
+  actions: PoleActionItem[];
+  allowed_transitions: string[];
+};
+
+type ApiRequeteMessage = {
+  id: number;
+  contenu: string;
+  is_interne: boolean;
+  created_at: string;
+  auteur: string;
+};
+
+type ApiPoleMember = {
+  id: number;
+  user_id_read: number;
+  user_first_name: string;
+  user_last_name: string;
+  user_email: string;
+};
+
 type TicketView = {
   id: string;
   reference: string;
@@ -102,6 +155,9 @@ type TicketView = {
   poleName?: string;
   delegateName?: string | null;
   requesterName?: string | null;
+  dossierDisplay?: string | null;
+  dateCloture?: string | null;
+  compteRendu?: string | null;
 };
 
 export default function TicketDetail() {
@@ -114,7 +170,7 @@ export default function TicketDetail() {
   const [profile, setProfile] = useState<ApiProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [messages] = useState<Array<{ id: string }>>([]);
+  const [messages, setMessages] = useState<ApiRequeteMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   
   // Classification state
@@ -125,6 +181,24 @@ export default function TicketDetail() {
     delegateId: '',
   });
   const [isClassifying, setIsClassifying] = useState(false);
+
+  // Actions du pôle (processeur métier)
+  const [poleActions, setPoleActions] = useState<PoleActionItem[]>([]);
+  const [allowedTransitions, setAllowedTransitions] = useState<string[]>([]);
+  const [poleActionsLoading, setPoleActionsLoading] = useState(false);
+  const [selectedAction, setSelectedAction] = useState<PoleActionItem | null>(null);
+  const [actionForm, setActionForm] = useState<Record<string, string>>({});
+  const [isExecutingAction, setIsExecutingAction] = useState(false);
+  const [isChangingStatus, setIsChangingStatus] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [poleMembersForAssign, setPoleMembersForAssign] = useState<ApiPoleMember[]>([]);
+  const [poleMembersLoading, setPoleMembersLoading] = useState(false);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [maquetteDefault, setMaquetteDefault] = useState<ApiMaquetteCompteRendu | null>(null);
+  const [compteRenduForm, setCompteRenduForm] = useState({ dateCloture: '', compteRendu: '' });
+  const [isSavingCompteRendu, setIsSavingCompteRendu] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const canClassify = useMemo(
     () =>
@@ -172,6 +246,9 @@ export default function TicketDetail() {
           poleName: ticketData.pole?.nom,
           delegateName: ticketData.delegue_syndical ?? null,
           requesterName: ticketData.travailleur ?? null,
+          dossierDisplay: ticketData.dossier ?? null,
+          dateCloture: ticketData.date_cloture ?? null,
+          compteRendu: ticketData.compte_rendu ?? null,
         };
 
         setTicket(mapped);
@@ -183,9 +260,42 @@ export default function TicketDetail() {
           type: ticketData.type_probleme,
           urgency: ticketData.priorite,
           poleId: ticketData.pole ? String(ticketData.pole.id) : '',
-          delegateId: '',
+          delegateId:
+            ticketData.delegue_syndical_id_read != null
+              ? String(ticketData.delegue_syndical_id_read)
+              : '',
         });
         setErrorMessage(null);
+
+        // Charger les actions métier du pôle (processeur)
+        if (ticketData.pole) {
+          setPoleActionsLoading(true);
+          try {
+            const poleActionsData = await apiRequest<PoleActionsResponse>(
+              `/requetes/${id}/pole-actions/`
+            );
+            setPoleActions(poleActionsData.actions ?? []);
+            setAllowedTransitions(poleActionsData.allowed_transitions ?? []);
+          } catch {
+            setPoleActions([]);
+            setAllowedTransitions([]);
+          } finally {
+            setPoleActionsLoading(false);
+          }
+        } else {
+          setPoleActions([]);
+          setAllowedTransitions([]);
+        }
+
+        // Charger les messages (dont demandes d'information)
+        try {
+          const messagesData = await apiRequest<ApiRequeteMessage[]>(
+            `/requetes/${id}/messages/`
+          );
+          setMessages(Array.isArray(messagesData) ? messagesData : []);
+        } catch {
+          setMessages([]);
+        }
       } catch {
         setErrorMessage("Impossible de charger la requête.");
       } finally {
@@ -195,6 +305,49 @@ export default function TicketDetail() {
 
     loadTicket();
   }, [id]);
+
+  // Charger les responsables assignables (membres du pôle) quand on ouvre l'action "Assigner à un responsable"
+  useEffect(() => {
+    if (selectedAction?.id !== 'assign' || !ticket?.id) {
+      setPoleMembersForAssign([]);
+      return;
+    }
+    let cancelled = false;
+    setPoleMembersLoading(true);
+    apiRequest<ApiPoleMember[]>(`/requetes/${ticket.id}/assignable-members/`)
+      .then((data) => {
+        if (!cancelled) setPoleMembersForAssign(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setPoleMembersForAssign([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPoleMembersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAction?.id, ticket?.id]);
+
+  // Charger la maquette par défaut quand la requête est clôturée
+  useEffect(() => {
+    if (ticket?.status !== 'closed') {
+      setMaquetteDefault(null);
+      return;
+    }
+    setCompteRenduForm({
+      dateCloture: ticket.dateCloture ?? '',
+      compteRendu: ticket.compteRendu ?? '',
+    });
+    apiRequest<ApiMaquetteCompteRendu[] | { results: ApiMaquetteCompteRendu[] }>(
+      '/maquettes-compte-rendu/?is_default=true'
+    )
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data?.results ?? [];
+        setMaquetteDefault(list[0] ?? null);
+      })
+      .catch(() => setMaquetteDefault(null));
+  }, [ticket?.status, ticket?.dateCloture, ticket?.compteRendu]);
 
   // Check if ticket needs classification (no type or urgency)
   const needsClassification = ticket && (!ticket.type || !ticket.urgency);
@@ -220,30 +373,150 @@ export default function TicketDetail() {
 
   const currentStatusIndex = statusSteps.indexOf(ticket.status);
 
-  const handleSendMessage = () => {
-    if (newMessage.trim()) {
-      // Handle message sending
+  const handleSendMessage = async () => {
+    const text = newMessage.trim();
+    if (!text || !ticket || isSendingMessage) return;
+    setIsSendingMessage(true);
+    try {
+      const created = await apiRequest<ApiRequeteMessage>(
+        `/requetes/${ticket.id}/messages/`,
+        { method: 'POST', body: JSON.stringify({ contenu: text }) }
+      );
+      setMessages((prev) => [...prev, created]);
       setNewMessage('');
+    } catch {
+      toast({
+        title: 'Erreur',
+        description: 'Impossible d\'envoyer le message.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
+
+  const handleSaveCompteRendu = async () => {
+    if (!ticket) return;
+    setIsSavingCompteRendu(true);
+    try {
+      const body: Record<string, string> = {};
+      if (compteRenduForm.dateCloture?.trim()) body.date_cloture = compteRenduForm.dateCloture.trim();
+      if (compteRenduForm.compteRendu?.trim()) body.compte_rendu = compteRenduForm.compteRendu.trim();
+      const updated = await apiRequest<ApiTicket>(`/requetes/${ticket.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      setTicket((prev) => prev ? { ...prev, dateCloture: updated.date_cloture ?? undefined, compteRendu: updated.compte_rendu ?? undefined } : prev);
+      setCompteRenduForm({ dateCloture: updated.date_cloture ?? '', compteRendu: updated.compte_rendu ?? '' });
+      toast({ title: 'Compte rendu enregistré', description: 'Le compte rendu de clôture a été mis à jour.' });
+    } catch {
+      toast({ title: 'Erreur', description: "Impossible d'enregistrer le compte rendu.", variant: 'destructive' });
+    } finally {
+      setIsSavingCompteRendu(false);
+    }
+  };
+
+  const handleDownloadCompteRenduPdf = async () => {
+    if (!ticket) return;
+    setIsDownloadingPdf(true);
+    try {
+      await downloadFile(
+        `/requetes/${ticket.id}/compte-rendu-pdf/`,
+        `compte-rendu-${ticket.reference}.pdf`
+      );
+      toast({ title: 'Téléchargement démarré', description: 'Le PDF du compte rendu a été téléchargé.' });
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'data' in err && err.data && typeof err.data === 'object' && 'detail' in (err.data as object)
+          ? String((err.data as { detail: unknown }).detail)
+          : "Impossible de télécharger le PDF.";
+      toast({ title: 'Erreur', description: msg, variant: 'destructive' });
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  const handleAttachClick = () => fileInputRef.current?.click();
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !ticket) return;
+    setIsUploadingAttachment(true);
+    try {
+      const form = new FormData();
+      form.append('fichier', file);
+      form.append('description', file.name);
+      form.append('type_document', 'AUTRE');
+      const created = await apiRequest<ApiPieceJointe>(
+        `/requetes/${ticket.id}/pieces-jointes/`,
+        { method: 'POST', body: form }
+      );
+      setAttachments((prev) => [...prev, created]);
+      toast({ title: 'Pièce jointe ajoutée', description: file.name });
+    } catch {
+      toast({
+        title: 'Erreur',
+        description: "Impossible d'ajouter la pièce jointe.",
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUploadingAttachment(false);
     }
   };
 
   const handleSaveClassification = async () => {
+    const body: Record<string, number | string> = {};
+    if (classification.type?.trim()) body.type_probleme = classification.type.trim();
+    if (classification.urgency?.trim()) body.priorite = classification.urgency.trim();
+    if (classification.poleId?.trim()) body.pole_id = Number(classification.poleId);
+    if (classification.delegateId?.trim()) body.delegue_syndical_id = Number(classification.delegateId);
+    if (Object.keys(body).length === 0) {
+      toast({
+        title: 'Aucune modification',
+        description: 'Renseignez au moins un champ (type, urgence, pôle ou délégué).',
+        variant: 'destructive',
+      });
+      return;
+    }
     setIsClassifying(true);
     try {
       await apiRequest(`/requetes/${ticket.id}/`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          type_probleme: classification.type,
-          priorite: classification.urgency,
-          pole_id: classification.poleId ? Number(classification.poleId) : undefined,
-          delegue_syndical_id: classification.delegateId
-            ? Number(classification.delegateId)
-            : undefined,
-        }),
+        body: JSON.stringify(body),
       });
       toast({
         title: 'Classification enregistrée',
         description: "Le type et l'urgence ont été mis à jour avec succès.",
+      });
+      const updated = await apiRequest<ApiTicket>(`/requetes/${ticket.id}/`);
+      setTicket({
+        id: String(updated.id),
+        reference: updated.numero_reference,
+        type: updated.type_probleme,
+        urgency: updated.priorite,
+        status: updated.statut,
+        subject: updated.titre,
+        description: updated.description,
+        createdAt: updated.created_at,
+        updatedAt: updated.updated_at,
+        companyName: updated.entreprise?.nom ?? '-',
+        poleId: updated.pole ? String(updated.pole.id) : undefined,
+        poleName: updated.pole?.nom,
+        delegateName: updated.delegue_syndical ?? null,
+        requesterName: updated.travailleur ?? null,
+        dossierDisplay: updated.dossier ?? null,
+        dateCloture: updated.date_cloture ?? null,
+        compteRendu: updated.compte_rendu ?? null,
+      });
+      setClassification({
+        type: updated.type_probleme,
+        urgency: updated.priorite,
+        poleId: updated.pole ? String(updated.pole.id) : '',
+        delegateId:
+          updated.delegue_syndical_id_read != null
+            ? String(updated.delegue_syndical_id_read)
+            : '',
       });
     } catch {
       toast({
@@ -253,6 +526,119 @@ export default function TicketDetail() {
       });
     } finally {
       setIsClassifying(false);
+    }
+  };
+
+  const openActionDialog = (action: PoleActionItem) => {
+    setSelectedAction(action);
+    const initial: Record<string, string> = {};
+    [...action.required_fields, ...action.optional_fields].forEach((f) => {
+      initial[f] = '';
+    });
+    setActionForm(initial);
+  };
+
+  const handleChangeStatus = async (newStatus: string) => {
+    if (!ticket || isChangingStatus) return;
+    setIsChangingStatus(true);
+    try {
+      const updated = await apiRequest<ApiTicket>(`/requetes/${ticket.id}/change-status/`, {
+        method: 'POST',
+        body: JSON.stringify({ statut: newStatus }),
+      });
+      setTicket({
+        id: String(updated.id),
+        reference: updated.numero_reference,
+        type: updated.type_probleme,
+        urgency: updated.priorite,
+        status: updated.statut,
+        subject: updated.titre,
+        description: updated.description,
+        createdAt: updated.created_at,
+        updatedAt: updated.updated_at,
+        companyName: updated.entreprise?.nom ?? '-',
+        poleId: updated.pole ? String(updated.pole.id) : undefined,
+        poleName: updated.pole?.nom,
+        delegateName: updated.delegue_syndical ?? null,
+        requesterName: updated.travailleur ?? null,
+        dossierDisplay: updated.dossier ?? null,
+        dateCloture: updated.date_cloture ?? null,
+        compteRendu: updated.compte_rendu ?? null,
+      });
+      toast({
+        title: 'Statut mis à jour',
+        description: statusLabels[newStatus as TicketStatus] ?? newStatus,
+      });
+    } catch {
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de modifier le statut.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsChangingStatus(false);
+    }
+  };
+
+  const handleExecutePoleAction = async () => {
+    if (!selectedAction || !ticket) return;
+    const payload: Record<string, string> = { action_id: selectedAction.id };
+    [...selectedAction.required_fields, ...selectedAction.optional_fields].forEach((key) => {
+      const v = actionForm[key];
+      if (v != null && v.trim() !== '') payload[key] = v.trim();
+    });
+    const missing = selectedAction.required_fields.filter((f) => !payload[f]?.trim());
+    if (missing.length > 0) {
+      toast({
+        title: 'Champs requis',
+        description: `Veuillez renseigner : ${missing.join(', ')}`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsExecutingAction(true);
+    try {
+      const result = await apiRequest<{ message?: string; data?: Record<string, unknown> }>(
+        `/requetes/${ticket.id}/execute-pole-action/`,
+        { method: 'POST', body: JSON.stringify(payload) }
+      );
+      toast({
+        title: 'Action exécutée',
+        description: result.message || selectedAction.label,
+      });
+      setSelectedAction(null);
+      setActionForm({});
+      // Recharger la requête pour mettre à jour l'affichage
+      const ticketData = await apiRequest<ApiTicket>(`/requetes/${ticket.id}/`);
+      setTicket({
+        ...ticket,
+        status: ticketData.statut as TicketStatus,
+        updatedAt: ticketData.updated_at,
+        dateCloture: ticketData.date_cloture ?? undefined,
+        compteRendu: ticketData.compte_rendu ?? undefined,
+      });
+      const poleActionsData = await apiRequest<PoleActionsResponse>(
+        `/requetes/${ticket.id}/pole-actions/`
+      );
+      setPoleActions(poleActionsData.actions ?? []);
+      setAllowedTransitions(poleActionsData.allowed_transitions ?? []);
+      // Recharger les messages (ex. nouvelle demande d'information)
+      const messagesData = await apiRequest<ApiRequeteMessage[]>(
+        `/requetes/${ticket.id}/messages/`
+      );
+      setMessages(Array.isArray(messagesData) ? messagesData : []);
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'data' in err && err.data && typeof err.data === 'object' && 'detail' in err.data
+          ? String((err.data as { detail: unknown }).detail)
+          : "Impossible d'exécuter l'action.";
+      toast({
+        title: 'Erreur',
+        description: msg,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExecutingAction(false);
     }
   };
 
@@ -362,7 +748,7 @@ export default function TicketDetail() {
                       asChild
                     >
                       <a
-                        href={file.fichier}
+                        href={getMediaUrl(file.fichier)}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center"
@@ -415,10 +801,21 @@ export default function TicketDetail() {
                       </div>
                       <div className="flex-1 max-w-[80%]">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-medium">Utilisateur</span>
+                          <span className="text-sm font-medium">
+                            {message.auteur || 'Utilisateur'}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(message.created_at).toLocaleDateString('fr-FR', {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
                         </div>
                         <div className="p-3 rounded-lg bg-muted">
-                          <p className="text-sm">Message</p>
+                          <p className="text-sm whitespace-pre-wrap">{message.contenu}</p>
                         </div>
                       </div>
                     </div>
@@ -438,17 +835,87 @@ export default function TicketDetail() {
                 />
               </div>
               <div className="flex justify-between items-center mt-3">
-                <Button variant="outline" size="sm">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="*/*"
+                  onChange={handleFileChange}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAttachClick}
+                  disabled={isUploadingAttachment}
+                >
                   <Paperclip className="w-4 h-4 mr-2" />
-                  Joindre
+                  {isUploadingAttachment ? 'Envoi...' : 'Joindre'}
                 </Button>
-                <Button onClick={handleSendMessage} disabled={!newMessage.trim()}>
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!newMessage.trim() || isSendingMessage}
+                >
                   <Send className="w-4 h-4 mr-2" />
-                  Envoyer
+                  {isSendingMessage ? 'Envoi...' : 'Envoyer'}
                 </Button>
               </div>
             </div>
           </div>
+
+          {/* Compte rendu de clôture - visible quand la requête est clôturée */}
+          {ticket.status === 'closed' && (
+            <div className="bg-card rounded-xl border shadow-card overflow-hidden">
+              <div className="p-4 border-b border-border flex items-center gap-2">
+                <FileText className="w-5 h-5 text-muted-foreground" />
+                <h3 className="font-semibold">Compte rendu de clôture</h3>
+              </div>
+              <div className="p-4 space-y-4">
+                {maquetteDefault && (
+                  <div>
+                    <Label className="text-sm font-medium text-muted-foreground">Maquette (référence)</Label>
+                    <pre className="mt-1 p-3 rounded-lg bg-muted text-sm whitespace-pre-wrap font-sans border border-border overflow-auto max-h-48">
+                      {maquetteDefault.contenu}
+                    </pre>
+                  </div>
+                )}
+                <div>
+                  <Label className="text-sm font-medium">Date de clôture</Label>
+                  <Input
+                    type="date"
+                    className="mt-1"
+                    value={compteRenduForm.dateCloture}
+                    onChange={(e) => setCompteRenduForm((p) => ({ ...p, dateCloture: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Compte rendu</Label>
+                  <Textarea
+                    className="mt-1 min-h-[120px]"
+                    placeholder="Rédigez le compte rendu de clôture (résumé, actions menées, conclusion)..."
+                    value={compteRenduForm.compteRendu}
+                    onChange={(e) => setCompteRenduForm((p) => ({ ...p, compteRendu: e.target.value }))}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={handleSaveCompteRendu}
+                    disabled={isSavingCompteRendu}
+                  >
+                    {isSavingCompteRendu ? 'Enregistrement...' : 'Enregistrer le compte rendu'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleDownloadCompteRenduPdf}
+                    disabled={isDownloadingPdf}
+                  >
+                    <FileDown className="w-4 h-4 mr-2" />
+                    {isDownloadingPdf ? 'Téléchargement...' : 'Télécharger en PDF'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}
@@ -571,11 +1038,74 @@ export default function TicketDetail() {
                 <Button 
                   className="w-full mt-2" 
                   onClick={handleSaveClassification}
-                  disabled={isClassifying || (!classification.type && !classification.urgency)}
+                  disabled={
+                    isClassifying ||
+                    (!classification.type?.trim() &&
+                      !classification.urgency?.trim() &&
+                      !classification.poleId?.trim() &&
+                      !classification.delegateId?.trim())
+                  }
                 >
                   {isClassifying ? 'Enregistrement...' : 'Enregistrer la classification'}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {/* Actions du pôle (processeur métier) */}
+          {ticket.poleId && (canClassify || poleActions.length > 0) && (
+            <div className="bg-card rounded-xl border shadow-card p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Zap className="w-5 h-5 text-primary" />
+                <h3 className="font-semibold">Actions du pôle</h3>
+              </div>
+              {poleActionsLoading ? (
+                <p className="text-sm text-muted-foreground">Chargement des actions...</p>
+              ) : poleActions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Aucune action spécifique pour ce pôle.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {poleActions.map((action) => (
+                    <Button
+                      key={action.id}
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start text-left h-auto py-2"
+                      onClick={() => openActionDialog(action)}
+                    >
+                      <span className="truncate">{action.label}</span>
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Changer le statut - connecté à l'API */}
+          {canClassify && (
+            <div className="bg-card rounded-xl border shadow-card p-6">
+              <h3 className="font-semibold mb-3">Changer le statut</h3>
+              <Select
+                value={ticket.status}
+                onValueChange={handleChangeStatus}
+                disabled={isChangingStatus}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(allowedTransitions.length > 0 ? allowedTransitions : statusSteps).map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {statusLabels[s as TicketStatus] ?? s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {isChangingStatus && (
+                <p className="text-xs text-muted-foreground mt-2">Mise à jour...</p>
+              )}
             </div>
           )}
 
@@ -584,6 +1114,14 @@ export default function TicketDetail() {
             <h3 className="font-semibold">Informations</h3>
             
             <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <User className="w-4 h-4 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Demandeur</p>
+                  <p className="font-medium">{ticket.requesterName ?? '-'}</p>
+                </div>
+              </div>
+
               <div className="flex items-center gap-3">
                 <Building2 className="w-4 h-4 text-muted-foreground" />
                 <div>
@@ -598,6 +1136,16 @@ export default function TicketDetail() {
                   <div>
                     <p className="text-xs text-muted-foreground">Pôle assigné</p>
                     <p className="font-medium">{ticket.poleName}</p>
+                  </div>
+                </div>
+              )}
+
+              {ticket.dossierDisplay && (
+                <div className="flex items-center gap-3">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Dossier</p>
+                    <p className="font-medium">{ticket.dossierDisplay}</p>
                   </div>
                 </div>
               )}
@@ -688,6 +1236,86 @@ export default function TicketDetail() {
           )}
         </div>
       </div>
+
+      {/* Dialog exécution action du pôle */}
+      <Dialog open={!!selectedAction} onOpenChange={(open) => !open && setSelectedAction(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{selectedAction?.label}</DialogTitle>
+            {selectedAction?.description && (
+              <DialogDescription>{selectedAction.description}</DialogDescription>
+            )}
+          </DialogHeader>
+          {selectedAction && (
+            <div className="space-y-4 py-4">
+              {[...selectedAction.required_fields, ...selectedAction.optional_fields].map((fieldKey) => (
+                <div key={fieldKey}>
+                  <Label className="text-sm capitalize">
+                    {fieldKey === 'new_status' ? 'Nouveau statut' : fieldKey === 'assignee_id' ? 'Responsable' : fieldKey.replace(/_/g, ' ')}
+                    {selectedAction.required_fields.includes(fieldKey) && (
+                      <span className="text-destructive ml-1">*</span>
+                    )}
+                  </Label>
+                  {selectedAction.id === 'change_status' && fieldKey === 'new_status' ? (
+                    <Select
+                      value={actionForm[fieldKey] ?? ''}
+                      onValueChange={(value) => setActionForm((prev) => ({ ...prev, [fieldKey]: value }))}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Choisir un statut" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {allowedTransitions.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {statusLabels[s] ?? s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : selectedAction.id === 'assign' && fieldKey === 'assignee_id' ? (
+                    <Select
+                      value={actionForm[fieldKey] ?? ''}
+                      onValueChange={(value) => setActionForm((prev) => ({ ...prev, [fieldKey]: value }))}
+                      disabled={poleMembersLoading}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder={poleMembersLoading ? 'Chargement...' : 'Choisir un responsable'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {poleMembersForAssign.map((m) => (
+                          <SelectItem key={m.id} value={String(m.user_id_read)}>
+                            {m.user_first_name} {m.user_last_name}
+                            {m.user_email ? ` (${m.user_email})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      className="mt-1"
+                      value={actionForm[fieldKey] ?? ''}
+                      onChange={(e) => setActionForm((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                      placeholder={fieldKey.replace(/_/g, ' ')}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSelectedAction(null)}
+              disabled={isExecutingAction}
+            >
+              Annuler
+            </Button>
+            <Button onClick={handleExecutePoleAction} disabled={isExecutingAction}>
+              {isExecutingAction ? 'Exécution...' : 'Exécuter'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

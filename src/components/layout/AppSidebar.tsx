@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { 
@@ -54,8 +53,12 @@ const bottomNavItems: NavItem[] = [
   { label: 'Paramètres', icon: Settings, href: '/settings' },
 ];
 
-export function AppSidebar() {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+interface AppSidebarProps {
+  isCollapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+}
+
+export function AppSidebar({ isCollapsed, onCollapsedChange }: AppSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const auth = useAuthOptional();
@@ -194,7 +197,7 @@ export function AppSidebar() {
           'hover:bg-sidebar-primary hover:text-sidebar-primary-foreground',
           'transition-colors duration-200'
         )}
-        onClick={() => setIsCollapsed(!isCollapsed)}
+        onClick={() => onCollapsedChange(!isCollapsed)}
       >
         {isCollapsed ? (
           <ChevronRight className="w-3 h-3" />
