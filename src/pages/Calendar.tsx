@@ -49,6 +49,8 @@ interface TicketActivity {
   ticketReference: string;
   ticketSubject: string;
   type: ActivityType;
+  /** Libellé du type renvoyé par l’API (ex. "Appel téléphonique") */
+  typeDisplay?: string;
   title: string;
   description?: string;
   scheduledDate: Date;
@@ -58,25 +60,30 @@ interface TicketActivity {
 }
 
 function mapCalendarEventToActivity(e: CalendarEvent): TicketActivity {
+  const statut = (e.statut ?? '').toString();
   const status: ActivityStatus =
-    e.statut === 'TERMINEE' || e.statut === 'completed' ? 'completed'
-      : e.statut === 'ANNULEE' || e.statut === 'cancelled' ? 'cancelled'
+    statut === 'TERMINEE' || statut === 'completed' ? 'completed'
+      : statut === 'ANNULEE' || statut === 'cancelled' ? 'cancelled'
       : 'planned';
-  const isActivite = e.event_type === 'activite';
+  const isActivite = (e.event_type ?? '').toString().toLowerCase() === 'activite';
   const ticketId = isActivite ? String(e.requete_id ?? '') : String(e.dossier_id ?? '');
   const ticketReference = (isActivite ? e.numero_reference : e.dossier_numero) ?? '';
   const type: ActivityType = isActivite
     ? (e.type_activite === 'call' ? 'call' : e.type_activite === 'document' ? 'document' : e.type_activite === 'note' ? 'note' : 'meeting')
     : 'meeting';
+  const startStr = e.start ?? '';
+  const scheduledDate = startStr ? new Date(startStr) : new Date(NaN);
+  const typeDisplay = isActivite ? (e.type_activite_display ?? '') : (e.type_reunion_display ?? '');
   return {
-    id: e.id,
+    id: e.id ?? `evt-${ticketId}-${startStr}`,
     ticketId,
     ticketReference,
-    ticketSubject: e.title,
+    ticketSubject: e.title ?? '',
     type,
-    title: e.title,
+    typeDisplay: typeDisplay || undefined,
+    title: e.title ?? '',
     description: e.description || (e.lieu ? `Lieu : ${e.lieu}` : undefined),
-    scheduledDate: new Date(e.start),
+    scheduledDate,
     status,
     createdBy: undefined,
     createdAt: undefined,
@@ -118,6 +125,27 @@ const MONTHS = [
 /** Clé unique pour regrouper les activités par jour (année-mois-jour en heure locale). */
 function getDateKey(date: Date): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+/** Heure seule (ex. "02:25"). */
+function formatActivityTime(scheduledDate: Date | string): string {
+  const d = typeof scheduledDate === 'string' ? new Date(scheduledDate) : (scheduledDate instanceof Date ? scheduledDate : new Date(scheduledDate as unknown as string));
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Date courte + heure pour la grille (ex. "25 févr. 02:25"). */
+function formatActivityDateShort(scheduledDate: Date | string): string {
+  const d = typeof scheduledDate === 'string' ? new Date(scheduledDate) : (scheduledDate instanceof Date ? scheduledDate : new Date(scheduledDate as unknown as string));
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/** Date complète pour le détail (ex. "25 févr. 2026 à 02:25"). */
+function formatActivityDateTime(scheduledDate: Date | string): string {
+  const d = typeof scheduledDate === 'string' ? new Date(scheduledDate) : (scheduledDate instanceof Date ? scheduledDate : new Date(scheduledDate as unknown as string));
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 function getDaysInMonth(year: number, month: number): Date[] {
@@ -175,23 +203,37 @@ export default function Calendar() {
   const [selectedStatuses, setSelectedStatuses] = useState<ActivityStatus[]>([]);
   const [selectedTicketId, setSelectedTicketId] = useState<string>('all');
 
-  // Charger les événements calendrier pour le mois affiché
+  // Charger les événements calendrier pour le mois affiché (plage en UTC pour tout le mois)
   useEffect(() => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    const start = new Date(year, month, 1);
-    const end = new Date(year, month + 1, 0, 23, 59, 59);
+    const start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+    const lastDay = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
     setLoading(true);
     setApiError(null);
     getCalendarEvents({
       start: start.toISOString(),
-      end: end.toISOString(),
+      end: lastDay.toISOString(),
     })
       .then((data) => {
-        const events = Array.isArray(data) ? data : (data as { results?: CalendarEvent[] })?.results ?? [];
-        const mapped = events.map(mapCalendarEventToActivity);
-        if (import.meta.env.DEV && events.length > 0) {
-          console.debug('[Calendar] events reçus:', events.length, '→ activités:', mapped.length, mapped);
+        const raw = data as
+          | CalendarEvent[]
+          | { events?: CalendarEvent[]; debug?: unknown }
+          | { results?: CalendarEvent[] }
+          | { data?: CalendarEvent[] };
+        const events: CalendarEvent[] = Array.isArray(raw)
+          ? raw
+          : (raw as { events?: CalendarEvent[] })?.events ??
+            (raw as { results?: CalendarEvent[] })?.results ??
+            (raw as { data?: CalendarEvent[] })?.data ??
+            [];
+        const mapped = events
+          .filter((e) => e && (e.start || e.id))
+          .map(mapCalendarEventToActivity)
+          .filter((a) => a.id && !Number.isNaN(new Date(a.scheduledDate).getTime()));
+        if (import.meta.env.DEV) {
+          const nActivites = events.filter((e) => e.event_type === 'activite').length;
+          console.debug('[Calendar] API:', events.length, 'événements dont', nActivites, 'activités → affichés:', mapped.length);
         }
         setActivitiesFromApi(mapped);
       })
@@ -251,7 +293,7 @@ export default function Calendar() {
     filteredActivities.forEach((activity) => {
       const raw = activity.scheduledDate;
       const date = raw instanceof Date ? raw : new Date(raw as unknown as string);
-      if (Number.isNaN(date.getTime())) return;
+      if (Number.isNaN(date.getTime())) return; // exclure événements sans date valide
       const key = getDateKey(date);
       if (!map.has(key)) {
         map.set(key, []);
@@ -592,12 +634,21 @@ export default function Calendar() {
                         <div
                           key={activity.id}
                           className={cn(
-                            'text-xs px-1.5 py-0.5 rounded truncate text-white',
+                            'text-xs px-1.5 py-0.5 rounded text-white',
                             statusColors[activity.status]
                           )}
-                          title={activity.title}
+                          title={`${activity.title} — Date : ${formatActivityDateShort(activity.scheduledDate)} — Requête ${activity.ticketReference}`}
                         >
-                          {activity.title}
+                          <span className="flex items-center gap-1 truncate">
+                            {activityTypeIcons[activity.type]}
+                            <span className="truncate">{activity.title}</span>
+                          </span>
+                          <div className="truncate mt-0.5 opacity-90 text-[10px] font-medium">
+                            Date : {formatActivityDateShort(activity.scheduledDate)}
+                          </div>
+                          <div className="truncate opacity-90 text-[10px]">
+                            Requête {activity.ticketReference}
+                          </div>
                         </div>
                       ))}
                       {activities.length > 2 && (
@@ -663,27 +714,26 @@ export default function Calendar() {
               >
                 <div className="flex items-start gap-3">
                   <div className={cn(
-                    'p-2 rounded-lg',
-                    activity.status === 'completed' 
+                    'p-2 rounded-lg shrink-0',
+                    activity.status === 'completed'
                       ? 'bg-green-500/10 text-green-500'
                       : activity.status === 'planned'
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-muted text-muted-foreground'
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-muted text-muted-foreground'
                   )}>
                     {activityTypeIcons[activity.type]}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <p className="font-medium text-sm">{activity.title}</p>
                       <Badge variant={activity.status === 'completed' ? 'default' : 'secondary'} className="text-xs">
                         {statusLabels[activity.status]}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {activityTypeLabels[activity.type]} • {new Date(activity.scheduledDate).toLocaleTimeString('fr-FR', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                    <p className="text-xs text-muted-foreground mt-0.5 flex flex-wrap items-center gap-1">
+                      {activity.typeDisplay || activityTypeLabels[activity.type]}
+                      <span>•</span>
+                      <span><strong>Date :</strong> {formatActivityDateTime(activity.scheduledDate)}</span>
                     </p>
                     {activity.description && (
                       <p className="text-sm text-muted-foreground mt-1">
@@ -696,14 +746,8 @@ export default function Calendar() {
                       onClick={() => setIsDialogOpen(false)}
                     >
                       <FileText className="w-3 h-3" />
-                      Dossier {activity.ticketReference}
+                      Requête {activity.ticketReference}
                     </Link>
-                    {activity.comment && (
-                      <div className="mt-2 p-2 rounded bg-background text-sm">
-                        <p className="text-xs text-muted-foreground mb-1">Compte-rendu :</p>
-                        {activity.comment}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
