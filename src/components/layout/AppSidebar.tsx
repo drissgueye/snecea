@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { 
@@ -25,6 +24,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useAuthOptional } from "@/contexts/AuthContext";
 
 interface NavItem {
   label: string;
@@ -45,22 +45,33 @@ const mainNavItems: NavItem[] = [
 ];
 
 const adminNavItems: NavItem[] = [
-  { label: 'Rapports', icon: BarChart3, href: '/reports', roles: ['admin', 'pole_manager'] },
-  { label: 'Administration', icon: Shield, href: '/admin', roles: ['admin'] },
+  { label: 'Rapports', icon: BarChart3, href: '/reports', roles: ['admin', 'super_admin'] },
+  { label: 'Administration', icon: Shield, href: '/admin', roles: ['admin', 'super_admin'] },
 ];
 
 const bottomNavItems: NavItem[] = [
   { label: 'Paramètres', icon: Settings, href: '/settings' },
 ];
 
-export function AppSidebar() {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+interface AppSidebarProps {
+  isCollapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+}
+
+export function AppSidebar({ isCollapsed, onCollapsedChange }: AppSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const auth = useAuthOptional();
+  const userRole = auth?.profile?.role;
+
+  const visibleAdminNavItems = adminNavItems.filter(
+    (item) => !item.roles || (userRole && item.roles.includes(userRole))
+  );
 
   const handleLogout = async () => {
     try {
       await logout();
+      auth?.setProfile(null);
     } finally {
       navigate('/login');
     }
@@ -151,7 +162,7 @@ export function AppSidebar() {
         
         <Separator className="my-4 bg-sidebar-border" />
         
-        {adminNavItems.map(renderNavItem)}
+        {visibleAdminNavItems.map(renderNavItem)}
       </nav>
 
       {/* Bottom section */}
@@ -186,7 +197,7 @@ export function AppSidebar() {
           'hover:bg-sidebar-primary hover:text-sidebar-primary-foreground',
           'transition-colors duration-200'
         )}
-        onClick={() => setIsCollapsed(!isCollapsed)}
+        onClick={() => onCollapsedChange(!isCollapsed)}
       >
         {isCollapsed ? (
           <ChevronRight className="w-3 h-3" />

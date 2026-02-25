@@ -37,6 +37,7 @@ import { cn } from '@/lib/utils';
 import { poleMembers, users as mockUsers } from '@/lib/mock-data';
 import { apiRequest } from '@/lib/api';
 import type { PoleMember } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
 
 type ApiPole = {
   id: number;
@@ -73,7 +74,19 @@ type PoleMemberWithUser = PoleMember & {
   userEmail?: string;
 };
 
+type ProfilePole = { pole_id: number; is_manager: boolean };
+
+function isPoleManagerForPole(
+  profile: { poles?: ProfilePole[] } | null,
+  poleId: number
+): boolean {
+  return Boolean(
+    profile?.poles?.some((p) => p.pole_id === poleId && p.is_manager)
+  );
+}
+
 export default function Poles() {
+  const { profile, isAdmin } = useAuth();
   const [polesList, setPolesList] = useState<ApiPole[]>([]);
   const [selectedPoleId, setSelectedPoleId] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
@@ -162,6 +175,10 @@ export default function Poles() {
       polesList[0],
     [polesList, selectedPoleId]
   );
+
+  const canAddMemberToPole =
+    isAdmin ||
+    (selectedPole != null && isPoleManagerForPole(profile, selectedPole.id));
 
   const memberEntries = membersByPole[selectedPole?.id ?? ''] ?? [];
   const isAtCapacity = memberEntries.length >= 6;
@@ -315,10 +332,12 @@ export default function Poles() {
             Consultez la liste des pôles, leurs détails et gérez les membres associés.
           </p>
         </div>
-        <Button onClick={() => setIsPoleDialogOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Créer un pôle
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setIsPoleDialogOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Créer un pôle
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -331,10 +350,12 @@ export default function Poles() {
               </CardTitle>
               <CardDescription>{polesList.length} pôle(s)</CardDescription>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setIsPoleDialogOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Créer
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setIsPoleDialogOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Créer
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="space-y-2 h-[70vh]">
             <ScrollArea className="h-full pr-2">
@@ -376,14 +397,18 @@ export default function Poles() {
             <CardTitle className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <span>Détails du pôle</span>
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" onClick={() => setIsPoleDialogOpen(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Créer un pôle
-                </Button>
-                <Button onClick={() => setIsAddDialogOpen(true)} disabled={isAtCapacity}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Ajouter un membre
-                </Button>
+                {isAdmin && (
+                  <Button variant="outline" onClick={() => setIsPoleDialogOpen(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Créer un pôle
+                  </Button>
+                )}
+                {canAddMemberToPole && (
+                  <Button onClick={() => setIsAddDialogOpen(true)} disabled={isAtCapacity}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Ajouter un membre
+                  </Button>
+                )}
               </div>
             </CardTitle>
             <CardDescription>
@@ -448,9 +473,9 @@ export default function Poles() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="head">Chef de pôle</SelectItem>
-                              <SelectItem value="assistant">Assistant</SelectItem>
-                              <SelectItem value="member">Membre</SelectItem>
+                              <SelectItem value="head">Responsable du pôle</SelectItem>
+                              <SelectItem value="assistant">Adjoint</SelectItem>
+                              <SelectItem value="member">Membre du pôle</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -498,12 +523,14 @@ export default function Poles() {
         </Card>
       </div>
 
-      <div className="flex items-center justify-end rounded-xl border bg-card p-4">
-        <Button onClick={() => setIsPoleDialogOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Créer un pôle
-        </Button>
-      </div>
+      {isAdmin && (
+        <div className="flex items-center justify-end rounded-xl border bg-card p-4">
+          <Button onClick={() => setIsPoleDialogOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Créer un pôle
+          </Button>
+        </div>
+      )}
 
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
         <DialogContent>

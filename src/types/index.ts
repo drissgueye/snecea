@@ -1,5 +1,5 @@
-// User roles
-export type UserRole = 'admin' | 'pole_manager' | 'head' | 'assistant' | 'delegate' | 'member';
+// Rôles globaux (le statut « responsable de pôle » est géré par PoleMembership.is_manager côté backend)
+export type UserRole = 'super_admin' | 'admin' | 'delegate' | 'member' | 'comptable';
 
 // User interface
 export interface User {

@@ -34,6 +34,8 @@ type ApiProfile = {
   first_name: string;
   last_name: string;
   user_email: string;
+  prenom?: string;
+  nom?: string;
 };
 
 const urgencyLevels = Object.entries(urgencyLabels) as [TicketUrgency, string][];
@@ -46,6 +48,7 @@ export default function SubmitRequest() {
   const [profile, setProfile] = useState<ApiProfile | null>(null);
   const [companies, setCompanies] = useState<ApiCompany[]>([]);
   const [poles, setPoles] = useState<ApiPole[]>([]);
+  const [usersList, setUsersList] = useState<ApiProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -53,6 +56,7 @@ export default function SubmitRequest() {
   const [formData, setFormData] = useState({
     companyId: '',
     poleId: '',
+    travailleurId: '',
     type: '' as TicketType | '',
     urgency: '' as TicketUrgency | '',
     otherTypeDetails: '',
@@ -61,6 +65,10 @@ export default function SubmitRequest() {
     files: [] as File[],
   });
 
+  const canSubmitForOthers = useMemo(
+    () => profile?.role === 'admin' || profile?.role === 'super_admin' || profile?.role === 'delegate',
+    [profile]
+  );
   const canClassify = useMemo(
     () => profile?.role === 'member' || profile?.role === 'delegate',
     [profile]
@@ -94,10 +102,25 @@ export default function SubmitRequest() {
         setProfile(profileData);
         setCompanies(companiesList);
         setPoles(polesList);
+
+        const canLoadUsers =
+          profileData.role === 'admin' || profileData.role === 'super_admin' || profileData.role === 'delegate';
+        if (canLoadUsers) {
+          try {
+            const profilsData = await apiRequest<{ results: ApiProfile[] }>('/profils/');
+            setUsersList(profilsData.results ?? []);
+          } catch {
+            setUsersList([]);
+          }
+        } else {
+          setUsersList([]);
+        }
+
         setFormData((prev) => ({
           ...prev,
           companyId: profileData.entreprise ? String(profileData.entreprise.id) : prev.companyId,
           poleId: prev.poleId || defaultPoleId,
+          travailleurId: prev.travailleurId || '',
           type: prev.type || defaultType,
           urgency: prev.urgency || 'medium',
         }));
@@ -166,8 +189,11 @@ export default function SubmitRequest() {
     }
     setIsSubmitting(true);
     try {
+      const travailleurId = formData.travailleurId
+        ? Number(formData.travailleurId)
+        : profile.user_id_read;
       const payload = {
-        travailleur_id: profile.user_id_read,
+        travailleur_id: travailleurId,
         entreprise_id: Number(formData.companyId),
         pole_id: Number(formData.poleId),
         type_probleme: formData.type || 'other',
@@ -295,13 +321,57 @@ export default function SubmitRequest() {
         {/* Step 1: Identification */}
         {currentStep === 1 && (
           <div className="space-y-6 animate-slide-up">
+            {canSubmitForOthers && usersList.length > 0 && (
+              <div>
+                <Label htmlFor="travailleur">Pour le compte de *</Label>
+                <Select
+                  value={formData.travailleurId || String(profile?.user_id_read ?? '')}
+                  onValueChange={(value) => setFormData({ ...formData, travailleurId: value })}
+                >
+                  <SelectTrigger className="mt-1.5" id="travailleur">
+                    <SelectValue placeholder="Choisir l'utilisateur" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={String(profile?.user_id_read ?? '')}>
+                      Moi-même ({profile?.first_name} {profile?.last_name})
+                    </SelectItem>
+                    {usersList
+                      .filter((u) => u.user_id_read !== profile?.user_id_read)
+                      .map((u) => (
+                        <SelectItem key={u.id} value={String(u.user_id_read)}>
+                          {u.prenom ?? u.first_name} {u.nom ?? u.last_name}
+                          {u.entreprise?.nom ? ` — ${u.entreprise.nom}` : ''}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground mt-1.5">
+                  Choisissez pour qui vous soumettez cette requête.
+                </p>
+              </div>
+            )}
             <div>
-              <h2 className="text-lg font-semibold mb-4">Vos informations</h2>
+              <h2 className="text-lg font-semibold mb-4">
+                {formData.travailleurId && formData.travailleurId !== String(profile?.user_id_read)
+                  ? 'Informations du bénéficiaire'
+                  : 'Vos informations'}
+              </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label>Nom complet</Label>
                   <Input
-                    value={profile ? `${profile.first_name} ${profile.last_name}` : ''}
+                    value={
+                      formData.travailleurId && formData.travailleurId !== String(profile?.user_id_read)
+                        ? (() => {
+                            const u = usersList.find(
+                              (x) => String(x.user_id_read) === formData.travailleurId
+                            );
+                            return u ? `${u.prenom ?? u.first_name} ${u.nom ?? u.last_name}` : '';
+                          })()
+                        : profile
+                          ? `${profile.first_name} ${profile.last_name}`
+                          : ''
+                    }
                     disabled
                     className="mt-1.5 bg-muted"
                   />
@@ -309,7 +379,13 @@ export default function SubmitRequest() {
                 <div>
                   <Label>Email</Label>
                   <Input
-                    value={profile?.user_email ?? ''}
+                    value={
+                      formData.travailleurId && formData.travailleurId !== String(profile?.user_id_read)
+                        ? (usersList.find(
+                            (x) => String(x.user_id_read) === formData.travailleurId
+                          )?.user_email ?? '')
+                        : profile?.user_email ?? ''
+                    }
                     disabled
                     className="mt-1.5 bg-muted"
                   />
