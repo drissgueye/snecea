@@ -14,7 +14,8 @@ import {
   ChevronRight,
   LogOut,
   Shield,
-  CalendarDays
+  CalendarDays,
+  Star
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -42,6 +43,7 @@ const mainNavItems: NavItem[] = [
   { label: 'Documents', icon: FolderOpen, href: '/documents' },
   { label: 'Délégués', icon: Users, href: '/delegates' },
   { label: 'Communication', icon: Megaphone, href: '/communication' },
+  { label: 'Notation des entreprises', icon: Star, href: '/notations-entreprises' },
 ];
 
 const adminNavItems: NavItem[] = [

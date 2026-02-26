@@ -1,5 +1,8 @@
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api';
 
+/** URL de base de l’API (pour diagnostic en dev). */
+export const getApiBaseUrl = () => API_URL;
+
 /** Base URL du backend (sans /api) pour les médias (pièces jointes, etc.) */
 export const MEDIA_BASE_URL =
   (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api').replace(/\/api\/?$/, '') ||
@@ -93,10 +96,29 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       const retryData = await retry.json().catch(() => ({}));
       throw { status: retry.status, data: retryData } as ApiError;
     }
+    // Refresh a échoué (token expiré ou invalide) : tokens déjà effacés par refreshAccessToken
+    throw {
+      status: 401,
+      data: {
+        detail: 'Session expirée. Veuillez vous reconnecter.',
+        code: 'session_expired',
+      },
+    } as ApiError;
   }
 
+  const htmlErrorDetail = (targetUrl: string) =>
+    `Le serveur a renvoyé du HTML au lieu de JSON pour ${targetUrl}. Démarrez le backend Django : dans le dossier backendCnts, exécutez "python manage.py runserver" (avec le venv activé). Vérifiez aussi que cnts/.env contient VITE_API_URL=http://127.0.0.1:8000/api puis redémarrez Vite (npm run dev).`;
+
   if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
+    const text = await response.text();
+    let data: unknown = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (text.trimStart().toLowerCase().startsWith('<!')) {
+        data = { detail: htmlErrorDetail(url) };
+      }
+    }
     throw { status: response.status, data } as ApiError;
   }
 
@@ -104,7 +126,18 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     return {} as T;
   }
 
-  return (await response.json()) as T;
+  const text = await response.text();
+  if (text.trimStart().toLowerCase().startsWith('<!')) {
+    throw {
+      status: 200,
+      data: { detail: htmlErrorDetail(url) },
+    } as ApiError;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw { status: 200, data: { detail: 'Réponse API invalide (pas du JSON).' } } as ApiError;
+  }
 }
 
 /** Événement calendrier (réunion planifiée) renvoyé par l’API */
@@ -138,9 +171,159 @@ export interface CalendarEvent {
 export async function getCalendarEvents(params: {
   start: string;
   end: string;
-}): Promise<CalendarEvent[]> {
+  event_type?: 'activite' | 'reunion';
+  debug?: boolean;
+}): Promise<CalendarEvent[] | { events: CalendarEvent[]; debug: Record<string, unknown> }> {
   const sp = new URLSearchParams({ start: params.start, end: params.end });
-  return apiRequest<CalendarEvent[]>(`/reunions/calendar-events/?${sp.toString()}`);
+  if (params.event_type) sp.set('event_type', params.event_type);
+  if (params.debug) sp.set('debug', '1');
+  return apiRequest<CalendarEvent[] | { events: CalendarEvent[]; debug: Record<string, unknown> }>(
+    `/reunions/calendar-events/?${sp.toString()}`
+  );
+}
+
+/** Requête (ticket) telle que retournée par GET /requetes/ (liste). */
+export interface RequeteListDto {
+  id: number;
+  numero_reference: string;
+  type_probleme: string;
+  priorite: string;
+  statut: string;
+  titre: string;
+  description?: string;
+  created_at?: string;
+  updated_at: string;
+  travailleur: string | null;
+  pole?: { id: number; nom: string } | null;
+  entreprise?: { id: number; nom: string; code?: string } | null;
+}
+
+/** Entreprise (GET /entreprises/). */
+export interface EntrepriseDto {
+  id: number;
+  nom: string;
+  code?: string;
+  adresse?: string;
+  secteur_activite?: string;
+}
+
+/** Réponse paginée GET /requetes/. */
+export interface RequetesListResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: RequeteListDto[];
+}
+
+/**
+ * Liste les requêtes (celles accessibles par l'utilisateur connecté).
+ * Utilisé par le tableau de bord et la liste des requêtes.
+ */
+export async function getRequetes(params?: {
+  page?: number;
+  page_size?: number;
+  search?: string;
+  statut?: string;
+  ordering?: string;
+}): Promise<RequetesListResponse> {
+  const sp = new URLSearchParams();
+  if (params?.page != null) sp.set('page', String(params.page));
+  if (params?.page_size != null) sp.set('page_size', String(params.page_size));
+  if (params?.search) sp.set('search', params.search);
+  if (params?.statut) sp.set('statut', params.statut);
+  if (params?.ordering) sp.set('ordering', params.ordering);
+  const query = sp.toString();
+  const url = `/requetes/${query ? `?${query}` : ''}`;
+  const data = await apiRequest<RequetesListResponse | { results: RequeteListDto[] }>(url);
+  if ('count' in data && Array.isArray(data.results)) {
+    return {
+      count: (data as RequetesListResponse).count ?? data.results.length,
+      next: (data as RequetesListResponse).next ?? null,
+      previous: (data as RequetesListResponse).previous ?? null,
+      results: data.results,
+    };
+  }
+  const results = Array.isArray(data) ? data : (data as { results?: RequeteListDto[] }).results ?? [];
+  return { count: results.length, next: null, previous: null, results };
+}
+
+/** Profil utilisateur connecté (GET /profils/me/). */
+export interface ProfileMeDto {
+  id?: number;
+  user?: string;
+  role?: string;
+  prenom?: string;
+  nom?: string;
+  email?: string;
+  telephone?: string;
+  entreprise?: { id: number; nom: string; code?: string } | null;
+  poles?: { pole_id: number; pole_nom: string; is_manager: boolean }[];
+}
+
+/** Récupère le profil de l'utilisateur connecté. */
+export async function getProfileMe(): Promise<ProfileMeDto> {
+  return apiRequest<ProfileMeDto>('/profils/me/');
+}
+
+/** Liste des entreprises (GET /entreprises/). */
+export async function getEntreprises(): Promise<EntrepriseDto[]> {
+  const data = await apiRequest<EntrepriseDto[] | { results: EntrepriseDto[] }>('/entreprises/');
+  return Array.isArray(data) ? data : (data as { results?: EntrepriseDto[] }).results ?? [];
+}
+
+/** Critères de notation des entreprises (alignés avec le backend). */
+export const CRITERES_NOTATION = [
+  { value: 'dialogue_social', label: 'Dialogue social' },
+  { value: 'respect_accords', label: 'Respect des accords et conformité' },
+  { value: 'conditions_travail', label: 'Conditions de travail' },
+  { value: 'remuneration', label: 'Rémunération et avantages' },
+  { value: 'formation', label: 'Formation et évolution' },
+  { value: 'sante_securite', label: 'Santé et sécurité au travail' },
+  { value: 'relation_syndicat', label: 'Relation avec le syndicat' },
+] as const;
+
+export type CritereNotationValue = (typeof CRITERES_NOTATION)[number]['value'];
+
+/** Une notation (un critère) pour une entreprise. */
+export interface NotationEntrepriseDto {
+  id: number;
+  entreprise: { id: number; nom: string; code?: string };
+  entreprise_id?: number;
+  critere: string;
+  critere_display: string;
+  note: number;
+  commentaire: string;
+  created_by: number;
+  created_by_display: string | null;
+  updated_at: string;
+}
+
+/** Liste les notations (GET /notations-entreprises/). Optionnel : ?entreprise=<id>. */
+export async function getNotationsEntreprise(params?: {
+  entreprise?: number;
+  critere?: string;
+}): Promise<NotationEntrepriseDto[]> {
+  const sp = new URLSearchParams();
+  if (params?.entreprise != null) sp.set('entreprise', String(params.entreprise));
+  if (params?.critere) sp.set('critere', params.critere);
+  const query = sp.toString();
+  const data = await apiRequest<NotationEntrepriseDto[] | { results: NotationEntrepriseDto[] }>(
+    `/notations-entreprises/${query ? `?${query}` : ''}`
+  );
+  return Array.isArray(data) ? data : (data as { results?: NotationEntrepriseDto[] }).results ?? [];
+}
+
+/** Crée ou met à jour une notation (POST = upsert par user + entreprise + critère). */
+export async function upsertNotationEntreprise(payload: {
+  entreprise_id: number;
+  critere: string;
+  note: number;
+  commentaire?: string;
+}): Promise<NotationEntrepriseDto> {
+  return apiRequest<NotationEntrepriseDto>('/notations-entreprises/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 /** Activité planifiée sur une requête (suivi d'activités, date affichée au calendrier) */
@@ -279,6 +462,262 @@ export async function getDocuments(params?: {
   const url = `/documents/${query ? `?${query}` : ''}`;
   const data = await apiRequest<DocumentSyndicalDto[] | { results: DocumentSyndicalDto[] }>(url);
   return Array.isArray(data) ? data : (data.results ?? []);
+}
+
+// ——— Gestion des documents (API /api/gestion-documents/) ———
+
+export interface GestionDocumentDto {
+  id: number;
+  titre: string;
+  description: string;
+  fichier: string | null;
+  is_suivi_requete: boolean;
+  pole: number | null;
+  pole_nom: string | null;
+  confidentialite: string;
+  confidentialite_display: string;
+  requete: number | null;
+  requete_numero: string | null;
+  statut: string;
+  statut_display: string;
+  created_by: number;
+  created_by_username: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GestionDocumentListDto {
+  id: number;
+  titre: string;
+  fichier: string | null;
+  is_suivi_requete: boolean;
+  pole: number | null;
+  pole_nom: string | null;
+  confidentialite: string;
+  confidentialite_display: string;
+  requete: number | null;
+  requete_numero: string | null;
+  statut: string;
+  statut_display: string;
+  created_at: string;
+}
+
+export interface GestionDocumentHistoriqueDto {
+  id: number;
+  action: string;
+  action_display: string;
+  champ_modifie: string | null;
+  ancienne_valeur: string | null;
+  nouvelle_valeur: string | null;
+  commentaire: string;
+  timestamp: string;
+  utilisateur: number;
+  utilisateur_display: string | null;
+}
+
+export interface GestionDocumentChoicesDto {
+  confidentialite: { value: string; label: string }[];
+  statut: { value: string; label: string }[];
+  type_action: { value: string; label: string }[];
+}
+
+const GESTION_DOCS_BASE = 'gestion-documents';
+
+export async function getGestionDocuments(params?: {
+  search?: string;
+  pole?: number;
+  confidentialite?: string;
+  statut?: string;
+  requete?: number;
+  ordering?: string;
+}): Promise<GestionDocumentListDto[]> {
+  const sp = new URLSearchParams();
+  if (params?.search) sp.set('search', params.search);
+  if (params?.pole != null) sp.set('pole', String(params.pole));
+  if (params?.confidentialite) sp.set('confidentialite', params.confidentialite);
+  if (params?.statut) sp.set('statut', params.statut);
+  if (params?.requete != null) sp.set('requete', String(params.requete));
+  if (params?.ordering) sp.set('ordering', params.ordering);
+  const query = sp.toString();
+  const url = `/${GESTION_DOCS_BASE}/${query ? `?${query}` : ''}`;
+  const data = await apiRequest<GestionDocumentListDto[] | { count?: number; results?: GestionDocumentListDto[] }>(url);
+  return Array.isArray(data) ? data : (data.results ?? []);
+}
+
+export async function getGestionDocument(id: number): Promise<GestionDocumentDto> {
+  return apiRequest<GestionDocumentDto>(`/${GESTION_DOCS_BASE}/${id}/`);
+}
+
+export async function createGestionDocument(formData: FormData): Promise<GestionDocumentDto> {
+  return apiRequest<GestionDocumentDto>(`/${GESTION_DOCS_BASE}/`, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function updateGestionDocument(
+  id: number,
+  payload: FormData | Record<string, unknown>
+): Promise<GestionDocumentDto> {
+  const isForm = payload instanceof FormData;
+  return apiRequest<GestionDocumentDto>(`/${GESTION_DOCS_BASE}/${id}/`, {
+    method: 'PATCH',
+    body: isForm ? payload : JSON.stringify(payload),
+  });
+}
+
+export async function deleteGestionDocument(id: number): Promise<void> {
+  await apiRequest(`/${GESTION_DOCS_BASE}/${id}/`, { method: 'DELETE' });
+}
+
+export async function getGestionDocumentHistorique(
+  id: number
+): Promise<GestionDocumentHistoriqueDto[]> {
+  return apiRequest<GestionDocumentHistoriqueDto[]>(`/${GESTION_DOCS_BASE}/${id}/historique/`);
+}
+
+export async function getGestionDocumentChoices(): Promise<GestionDocumentChoicesDto> {
+  return apiRequest<GestionDocumentChoicesDto>(`/${GESTION_DOCS_BASE}/choices/`);
+}
+
+/** Crée les documents de suivi pour les requêtes qui n'en ont pas (réservé aux admins). */
+export async function ensureGestionDocumentsSuivi(): Promise<{ created: number; detail: string }> {
+  return apiRequest<{ created: number; detail: string }>(`/${GESTION_DOCS_BASE}/ensure-suivi/`, {
+    method: 'POST',
+  });
+}
+
+// ——— Communications (pôle Communication) ———
+
+export interface CommunicationPieceJointeDto {
+  id: number;
+  fichier: string;
+  description: string;
+  uploaded_by: number;
+  uploaded_at: string;
+}
+
+export interface CommunicationPostDto {
+  id: number;
+  titre: string;
+  contenu: string;
+  visibilite: 'global' | 'company' | 'pole';
+  entreprise_cible: number | null;
+  entreprise_cible_nom: string | null;
+  pole_cible: number | null;
+  pole_cible_nom: string | null;
+  auteur: number;
+  auteur_username: string;
+  auteur_first_name: string;
+  auteur_last_name: string;
+  pieces_jointes: CommunicationPieceJointeDto[];
+  created_at: string;
+}
+
+const COMMUNICATIONS_BASE = 'communications';
+
+export interface CommunicationsListResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: CommunicationPostDto[];
+}
+
+export async function getCommunications(params?: {
+  search?: string;
+  visibilite?: string;
+  entreprise_cible?: number;
+  pole_cible?: number;
+  ordering?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<CommunicationsListResponse> {
+  const sp = new URLSearchParams();
+  if (params?.search) sp.set('search', params.search);
+  if (params?.visibilite) sp.set('visibilite', params.visibilite);
+  if (params?.entreprise_cible != null) sp.set('entreprise_cible', String(params.entreprise_cible));
+  if (params?.pole_cible != null) sp.set('pole_cible', String(params.pole_cible));
+  if (params?.ordering) sp.set('ordering', params.ordering);
+  if (params?.page != null) sp.set('page', String(params.page));
+  if (params?.page_size != null) sp.set('page_size', String(params.page_size));
+  const query = sp.toString();
+  const url = `/${COMMUNICATIONS_BASE}/${query ? `?${query}` : ''}`;
+  const data = await apiRequest<CommunicationsListResponse>(url);
+  return {
+    count: data.count ?? 0,
+    next: data.next ?? null,
+    previous: data.previous ?? null,
+    results: data.results ?? [],
+  };
+}
+
+export async function getCommunication(id: number): Promise<CommunicationPostDto> {
+  return apiRequest<CommunicationPostDto>(`/${COMMUNICATIONS_BASE}/${id}/`);
+}
+
+/** Indique si l'utilisateur connecté peut créer/modifier/supprimer des communications (pôle Communication ou admin). */
+export async function getCommunicationCanManage(): Promise<{ can_manage: boolean }> {
+  return apiRequest<{ can_manage: boolean }>(`/${COMMUNICATIONS_BASE}/can_manage/`);
+}
+
+/** Payload pour créer une publication (titre, contenu, visibilité ; cibles optionnelles selon visibilité). */
+export interface CreateCommunicationPostPayload {
+  titre: string;
+  contenu: string;
+  visibilite: 'global' | 'company' | 'pole';
+  entreprise_cible?: number | null;
+  pole_cible?: number | null;
+}
+
+/** Crée une nouvelle publication (pôle Communication ou admin). */
+export async function createCommunicationPost(
+  payload: CreateCommunicationPostPayload
+): Promise<CommunicationPostDto> {
+  return apiRequest<CommunicationPostDto>(`/${COMMUNICATIONS_BASE}/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Met à jour une publication (pôle Communication ou admin). */
+export async function updateCommunicationPost(
+  id: number,
+  payload: CreateCommunicationPostPayload
+): Promise<CommunicationPostDto> {
+  return apiRequest<CommunicationPostDto>(`/${COMMUNICATIONS_BASE}/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Supprime une publication (pôle Communication ou admin). */
+export async function deleteCommunicationPost(id: number): Promise<void> {
+  await apiRequest(`/${COMMUNICATIONS_BASE}/${id}/`, { method: 'DELETE' });
+}
+
+/** Upload une image pour l'insérer dans le contenu (éditeur riche). Retourne l'URL (chemin) à utiliser avec getMediaUrl. */
+export async function uploadCommunicationInlineImage(file: File): Promise<{ url: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiRequest<{ url: string }>(`/${COMMUNICATIONS_BASE}/upload_inline_image/`, {
+    method: 'POST',
+    body: form,
+  });
+}
+
+/** Ajoute une pièce jointe à une publication (après création). */
+export async function addCommunicationAttachment(
+  communicationId: number,
+  file: File,
+  description?: string
+): Promise<CommunicationPieceJointeDto> {
+  const form = new FormData();
+  form.append('file', file);
+  if (description != null && description !== '') form.append('description', description);
+  return apiRequest<CommunicationPieceJointeDto>(
+    `/${COMMUNICATIONS_BASE}/${communicationId}/add_attachment/`,
+    { method: 'POST', body: form }
+  );
 }
 
 /**
