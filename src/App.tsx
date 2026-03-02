@@ -17,6 +17,7 @@ import Delegates from "@/pages/Delegates";
 import Documents from "@/pages/Documents";
 import Communication from "@/pages/Communication";
 import Admin from "@/pages/Admin";
+import AdminActiviteTemplates from "@/pages/AdminActiviteTemplates";
 import Reports from "@/pages/Reports";
 import CompanyRatings from "@/pages/CompanyRatings";
 import Login from "@/pages/Login";
@@ -56,6 +57,7 @@ const App = () => (
             <Route path="/documents" element={<Documents />} />
             <Route path="/communication" element={<Communication />} />
             <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
+            <Route path="/admin/activite-templates" element={<RequireAdmin><AdminActiviteTemplates /></RequireAdmin>} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/notations-entreprises" element={<CompanyRatings />} />
             <Route path="/profile" element={<Profile />} />

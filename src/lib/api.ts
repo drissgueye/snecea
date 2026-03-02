@@ -58,7 +58,11 @@ async function refreshAccessToken(): Promise<string | null> {
   });
 
   if (!response.ok) {
-    tokenStorage.clear();
+    // Ne déconnecter que si le refresh token est invalide ou expiré (401).
+    // En cas d'erreur réseau ou 5xx, on ne supprime pas les tokens pour éviter une déconnexion intempestive.
+    if (response.status === 401) {
+      tokenStorage.clear();
+    }
     return null;
   }
 
@@ -271,15 +275,22 @@ export async function getEntreprises(): Promise<EntrepriseDto[]> {
   return Array.isArray(data) ? data : (data as { results?: EntrepriseDto[] }).results ?? [];
 }
 
-/** Critères de notation des entreprises (alignés avec le backend). */
+/** Critères de notation des entreprises (alignés avec le backend).
+ * Section 1 : Critères d'évaluation des entreprises
+ * Section 2 : Convention collective des Assurances
+ */
 export const CRITERES_NOTATION = [
-  { value: 'dialogue_social', label: 'Dialogue social' },
-  { value: 'respect_accords', label: 'Respect des accords et conformité' },
-  { value: 'conditions_travail', label: 'Conditions de travail' },
-  { value: 'remuneration', label: 'Rémunération et avantages' },
-  { value: 'formation', label: 'Formation et évolution' },
-  { value: 'sante_securite', label: 'Santé et sécurité au travail' },
-  { value: 'relation_syndicat', label: 'Relation avec le syndicat' },
+  { value: 'conformite_contrats', label: 'Conformité des contrats', section: 1 as const },
+  { value: 'remuneration_avantages', label: 'Rémunération et avantages', section: 1 as const },
+  { value: 'securite_sante', label: 'Sécurité et santé', section: 1 as const },
+  { value: 'relations_sociales', label: 'Relations sociales', section: 1 as const },
+  { value: 'rupture_contrat', label: 'Rupture du contrat', section: 1 as const },
+  { value: 'rupture_communication', label: 'Rupture de communication', section: 1 as const },
+  { value: 'classification_professionnelle', label: 'Classification professionnelle', section: 2 as const },
+  { value: 'primes_specifiques', label: 'Primes spécifiques', section: 2 as const },
+  { value: 'conditions_travail_cca', label: 'Conditions de travail (CCA)', section: 2 as const },
+  { value: 'formation', label: 'Formation', section: 2 as const },
+  { value: 'traitement_equitable', label: 'Traitement équitable', section: 2 as const },
 ] as const;
 
 export type CritereNotationValue = (typeof CRITERES_NOTATION)[number]['value'];
@@ -324,6 +335,14 @@ export async function upsertNotationEntreprise(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+/** Notation automatique calculée à partir des requêtes clôturées (résolu / non résolu). GET /entreprises/:id/notation-automatique/ */
+export async function getNotationAutomatique(entrepriseId: number): Promise<Record<string, number>> {
+  const data = await apiRequest<Record<string, number>>(
+    `/entreprises/${entrepriseId}/notation-automatique/`
+  );
+  return data ?? {};
 }
 
 /** Activité planifiée sur une requête (suivi d'activités, date affichée au calendrier) */
@@ -382,7 +401,8 @@ export async function getRequeteActivityTypeChoices(
 export async function createRequeteActivite(
   requeteId: string,
   data: {
-    type_activite: string;
+    type_activite?: string;
+    activite_template_id?: number | null;
     titre: string;
     description?: string;
     date_planifiee: string;
@@ -430,6 +450,143 @@ export async function updateRequeteActivite(
       body: JSON.stringify(jsonData),
     }
   );
+}
+
+// ---------- Modèles d'activité dynamiques (admin + workflow) ----------
+
+export interface ChampActiviteTemplateDto {
+  id?: number;
+  nom: string;
+  label: string;
+  type_champ: string;
+  type_champ_display?: string;
+  required: boolean;
+  ordre: number;
+  options: { value: string; label: string }[];
+  is_active: boolean;
+}
+
+export interface ActiviteTemplateDto {
+  id: number;
+  nom: string;
+  code: string;
+  description: string;
+  is_active: boolean;
+  ordre: number;
+  champs: ChampActiviteTemplateDto[];
+  pole_ids: number[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ActiviteTemplateListeDto {
+  id: number;
+  nom: string;
+  code: string;
+  is_active: boolean;
+  ordre: number;
+  pole_ids: number[];
+  created_at?: string;
+}
+
+/** Réponse paginée de l’API (activite-templates, etc.). */
+export interface PaginatedResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+/** Récupère une page de modèles d’activité (pour la liste avec pagination). */
+export async function getActiviteTemplatesPage(params?: {
+  pole_id?: number;
+  is_active?: boolean;
+  page?: number;
+  search?: string;
+  created_after?: string;
+  created_before?: string;
+}): Promise<PaginatedResponse<ActiviteTemplateListeDto>> {
+  const search = new URLSearchParams();
+  if (params?.pole_id != null) search.set('pole', String(params.pole_id));
+  if (params?.is_active != null) search.set('is_active', String(params.is_active));
+  if (params?.page != null && params.page > 0) search.set('page', String(params.page));
+  if (params?.search != null && params.search.trim() !== '') search.set('search', params.search.trim());
+  if (params?.created_after != null && params.created_after.trim() !== '') search.set('created_after', params.created_after.trim());
+  if (params?.created_before != null && params.created_before.trim() !== '') search.set('created_before', params.created_before.trim());
+  const q = search.toString();
+  const path = `/activite-templates/${q ? `?${q}` : ''}`;
+  return apiRequest<PaginatedResponse<ActiviteTemplateListeDto>>(path);
+}
+
+/** Récupère tous les modèles d’activité (toutes pages, pour listes déroulantes, etc.). */
+export async function getActiviteTemplates(params?: {
+  pole_id?: number;
+  is_active?: boolean;
+}): Promise<ActiviteTemplateListeDto[]> {
+  const search = new URLSearchParams();
+  if (params?.pole_id != null) search.set('pole', String(params.pole_id));
+  if (params?.is_active != null) search.set('is_active', String(params.is_active));
+  const q = search.toString();
+  const path = `/activite-templates/${q ? `?${q}` : ''}`;
+  const first = await apiRequest<PaginatedResponse<ActiviteTemplateListeDto> | ActiviteTemplateListeDto[]>(path);
+  if (Array.isArray(first)) return first;
+  const all: ActiviteTemplateListeDto[] = [...(first.results ?? [])];
+  let nextUrl: string | null = first.next ?? null;
+  while (nextUrl) {
+    const u = new URL(nextUrl);
+    const nextPath = u.pathname.replace(/^\/api/, '') + u.search;
+    const page = await apiRequest<PaginatedResponse<ActiviteTemplateListeDto>>(nextPath);
+    all.push(...(page.results ?? []));
+    nextUrl = page.next ?? null;
+  }
+  return all;
+}
+
+export async function getActiviteTemplate(id: number): Promise<ActiviteTemplateDto> {
+  return apiRequest<ActiviteTemplateDto>(`/activite-templates/${id}/`);
+}
+
+/** Activités disponibles pour un pôle (workflow). */
+export async function getActivitesDisponibles(poleId: number): Promise<ActiviteTemplateDto[]> {
+  return apiRequest<ActiviteTemplateDto[]>(`/poles/${poleId}/activites-disponibles/`);
+}
+
+export async function createActiviteTemplate(data: {
+  nom: string;
+  code: string;
+  description?: string;
+  is_active?: boolean;
+  ordre?: number;
+  champs: Partial<ChampActiviteTemplateDto>[];
+  pole_ids: number[];
+}): Promise<ActiviteTemplateDto> {
+  return apiRequest<ActiviteTemplateDto>('/activite-templates/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateActiviteTemplate(
+  id: number,
+  data: Partial<{
+    nom: string;
+    code: string;
+    description: string;
+    is_active: boolean;
+    ordre: number;
+    champs: Partial<ChampActiviteTemplateDto>[];
+    pole_ids: number[];
+  }>
+): Promise<ActiviteTemplateDto> {
+  return apiRequest<ActiviteTemplateDto>(`/activite-templates/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+/** Désactive un modèle (soft delete). */
+export async function deleteActiviteTemplate(id: number): Promise<void> {
+  return apiRequest<void>(`/activite-templates/${id}/`, { method: 'DELETE' });
 }
 
 /** Document syndical (API documents) */

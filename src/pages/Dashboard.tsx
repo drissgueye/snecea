@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { FileText, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { RecentTickets } from '@/components/dashboard/RecentTickets';
 import { QuickActions } from '@/components/dashboard/QuickActions';
@@ -7,7 +8,7 @@ import { CompanyInsights } from '@/components/dashboard/CompanyInsights';
 import { getEntreprises, getProfileMe, getRequetes, type EntrepriseDto, type RequeteListDto } from '@/lib/api';
 import type { Company, Ticket } from '@/types';
 
-const STATUT_CLOSED = ['resolved', 'closed'];
+const STATUT_CLOSED = ['resolved', 'non_resolu', 'closed'];
 
 function requeteToTicket(r: RequeteListDto): Ticket {
   const createdAt = r.created_at ? new Date(r.created_at) : new Date(r.updated_at);
@@ -39,7 +40,7 @@ function entrepriseToCompany(e: EntrepriseDto): Company {
 }
 
 export default function Dashboard() {
-  const [profile, setProfile] = useState<{ prenom?: string; nom?: string } | null>(null);
+  const [profile, setProfile] = useState<{ prenom?: string; nom?: string; role?: string } | null>(null);
   const [requetes, setRequetes] = useState<RequeteListDto[]>([]);
   const [entreprises, setEntreprises] = useState<EntrepriseDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,14 +82,32 @@ export default function Dashboard() {
     .map(requeteToTicket);
 
   const displayName = profile?.prenom || profile?.nom || '';
+  const roleLabels: Record<string, string> = {
+    super_admin: 'Super administrateur',
+    admin: 'Administrateur',
+    delegate: 'Délégué syndical',
+    member: 'Adhérent',
+    comptable: 'Comptable',
+    pole_manager: 'Responsable de pôle',
+    head: 'Responsable de pôle',
+    assistant: 'Assistant de pôle',
+  };
+  const roleLabel = profile?.role ? roleLabels[profile.role] ?? profile.role : null;
 
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Bonjour, {displayName || '…'} 👋
-        </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">
+            Bonjour, {displayName || '…'} 👋
+          </h1>
+          {roleLabel && (
+            <Badge variant="secondary" className="text-xs font-normal">
+              {roleLabel}
+            </Badge>
+          )}
+        </div>
         <p className="text-muted-foreground mt-1">
           Bienvenue sur votre espace S.N.E.C.E.A. Voici un aperçu de vos requêtes.
         </p>

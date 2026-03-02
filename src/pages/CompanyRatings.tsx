@@ -16,6 +16,7 @@ import {
 import {
   getEntreprises,
   getNotationsEntreprise,
+  getNotationAutomatique,
   upsertNotationEntreprise,
   CRITERES_NOTATION,
   type EntrepriseDto,
@@ -75,6 +76,8 @@ export default function CompanyRatings() {
   const [formComments, setFormComments] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  /** Notation automatique par entreprise (calculée à partir des requêtes). */
+  const [notationAutoByCompany, setNotationAutoByCompany] = useState<Record<number, Record<string, number>>>({});
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -84,8 +87,18 @@ export default function CompanyRatings() {
         getEntreprises(),
         getNotationsEntreprise(),
       ]);
-      setEntreprises(Array.isArray(entreprisesRes) ? entreprisesRes : []);
+      const entreprisesList = Array.isArray(entreprisesRes) ? entreprisesRes : [];
+      setEntreprises(entreprisesList);
       setNotations(Array.isArray(notationsRes) ? notationsRes : []);
+
+      const autoByCompany: Record<number, Record<string, number>> = {};
+      await Promise.all(
+        entreprisesList.map(async (e) => {
+          const auto = await getNotationAutomatique(e.id);
+          autoByCompany[e.id] = auto;
+        })
+      );
+      setNotationAutoByCompany(autoByCompany);
     } catch {
       setError('Impossible de charger les entreprises et les notations.');
     } finally {
@@ -99,20 +112,29 @@ export default function CompanyRatings() {
 
   const summaryByCompany: NotationByCompany[] = entreprises.map((entreprise) => {
     const companyNotations = notations.filter((n) => n.entreprise?.id === entreprise.id);
+    const autoNotes = notationAutoByCompany[entreprise.id] ?? {};
     const avgByCritere: Record<string, { avg: number; count: number }> = {};
+    let sumForOverall = 0;
+    let countForOverall = 0;
     CRITERES_NOTATION.forEach(({ value }) => {
       const forCritere = companyNotations.filter((n) => n.critere === value);
-      const count = forCritere.length;
-      const sum = forCritere.reduce((s, n) => s + n.note, 0);
+      const manualSum = forCritere.reduce((s, n) => s + n.note, 0);
+      const manualCount = forCritere.length;
+      const autoNote = autoNotes[value];
+      const hasManual = manualCount > 0;
+      const noteToUse = hasManual ? manualSum / manualCount : (autoNote ?? 0);
+      const countToUse = hasManual ? manualCount : (autoNote != null ? 1 : 0);
+      if (noteToUse > 0) {
+        sumForOverall += noteToUse * (hasManual ? manualCount : 1);
+        countForOverall += countToUse;
+      }
       avgByCritere[value] = {
-        avg: count ? Math.round((sum / count) * 10) / 10 : 0,
-        count,
+        avg: noteToUse ? Math.round(noteToUse * 10) / 10 : 0,
+        count: countToUse,
       };
     });
-    const totalSum = companyNotations.reduce((s, n) => s + n.note, 0);
-    const totalCount = companyNotations.length;
     const overallAvg =
-      totalCount > 0 ? Math.round((totalSum / totalCount) * 10) / 10 : 0;
+      countForOverall > 0 ? Math.round((sumForOverall / countForOverall) * 10) / 10 : 0;
     return {
       entreprise,
       notations: companyNotations,
@@ -125,17 +147,28 @@ export default function CompanyRatings() {
     const existing = notations.filter(
       (n) => n.entreprise?.id === entrepriseId
     ) as NotationEntrepriseDto[];
+    const autoNotes = notationAutoByCompany[entrepriseId] ?? {};
     const notes: Record<string, number> = {};
     const comments: Record<string, string> = {};
     CRITERES_NOTATION.forEach(({ value }) => {
       const one = existing.find((n) => n.critere === value);
-      notes[value] = one?.note ?? 0;
+      notes[value] = one?.note ?? autoNotes[value] ?? 0;
       comments[value] = one?.commentaire ?? '';
     });
     setFormNotes(notes);
     setFormComments(comments);
     setSelectedCompanyId(entrepriseId);
     setDialogOpen(true);
+  };
+
+  const applyNotationAutomatique = () => {
+    if (selectedCompanyId == null) return;
+    const auto = notationAutoByCompany[selectedCompanyId] ?? {};
+    const next: Record<string, number> = {};
+    CRITERES_NOTATION.forEach(({ value }) => {
+      next[value] = auto[value] ?? formNotes[value] ?? 0;
+    });
+    setFormNotes(next);
   };
 
   const handleSaveNotation = async () => {
@@ -170,7 +203,7 @@ export default function CompanyRatings() {
         </h1>
         <p className="text-muted-foreground mt-1">
           Consultez et renseignez les notes par critère pour chaque entreprise (1 = très
-          insuffisant, 5 = excellent).
+          insuffisant, 5 = excellent). La notation peut être calculée automatiquement à partir des requêtes clôturées (résolu / non résolu).
         </p>
       </div>
 
@@ -185,19 +218,76 @@ export default function CompanyRatings() {
         <CardHeader>
           <CardTitle className="text-base">Critères de notation</CardTitle>
           <CardDescription>
-            Ces critères permettent d&apos;évaluer la relation employeur / syndicat et les
-            conditions perçues.
+            Ces critères permettent d&apos;évaluer la relation employeur / syndicat, les conditions de travail
+            et le respect de la Convention collective des Assurances.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-muted-foreground">
-            {CRITERES_NOTATION.map((c) => (
-              <li key={c.value} className="flex items-center gap-2">
-                <Star className="w-4 h-4 text-amber-500/70 shrink-0" />
-                {c.label}
-              </li>
-            ))}
-          </ul>
+        <CardContent className="space-y-6">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground mb-2">1. Critères d&apos;évaluation des entreprises</h3>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-muted-foreground">
+              {CRITERES_NOTATION.filter((c) => c.section === 1).map((c) => (
+                <li key={c.value} className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-amber-500/70 shrink-0 mt-0.5" />
+                  <span><strong className="text-foreground">{c.label}</strong></span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground mb-2">2. Convention collective des Assurances</h3>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-muted-foreground">
+              {CRITERES_NOTATION.filter((c) => c.section === 2).map((c) => (
+                <li key={c.value} className="flex items-start gap-2">
+                  <Star className="w-4 h-4 text-amber-500/70 shrink-0 mt-0.5" />
+                  <span><strong className="text-foreground">{c.label}</strong></span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Détail des critères</CardTitle>
+          <CardDescription>
+            Définition de chaque critère pour une évaluation homogène.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <div>
+            <h3 className="font-semibold text-foreground mb-2">1. Critères d&apos;évaluation des entreprises</h3>
+            <dl className="space-y-2 text-muted-foreground">
+              <dt className="font-medium text-foreground">Conformité des contrats</dt>
+              <dd className="ml-0">Respect des types de contrats (CDD/CDI), des périodes d&apos;essai, et des clauses de non-concurrence.</dd>
+              <dt className="font-medium text-foreground">Rémunération et avantages</dt>
+              <dd className="ml-0">Respect des barèmes de salaires, paiement des heures supplémentaires et des primes de rendement.</dd>
+              <dt className="font-medium text-foreground">Sécurité et santé</dt>
+              <dd className="ml-0">Mise en place d&apos;un comité d&apos;hygiène et de sécurité, respect des normes de sécurité.</dd>
+              <dt className="font-medium text-foreground">Relations sociales</dt>
+              <dd className="ml-0">Existence de délégués du personnel, respect de la liberté syndicale.</dd>
+              <dt className="font-medium text-foreground">Rupture du contrat</dt>
+              <dd className="ml-0">Procédures de licenciement, paiement des indemnités de préavis et de licenciement.</dd>
+              <dt className="font-medium text-foreground">Rupture de communication</dt>
+              <dd className="ml-0">Avec les représentants du personnel, non-respect du calendrier d&apos;entretien avec les délégués.</dd>
+            </dl>
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground mb-2">2. Convention collective des Assurances</h3>
+            <dl className="space-y-2 text-muted-foreground">
+              <dt className="font-medium text-foreground">Classification professionnelle</dt>
+              <dd className="ml-0">Catégorisation des employés (1ère à 6ème catégorie, AM2, AM3, etc.) déterminant le salaire.</dd>
+              <dt className="font-medium text-foreground">Primes spécifiques</dt>
+              <dd className="ml-0">Prime d&apos;ancienneté (débutant à 2% après 2 ans, progressant jusqu&apos;à la 25ème année), prime de technicité, 13ème mois / gratifications.</dd>
+              <dt className="font-medium text-foreground">Conditions de travail (CCA)</dt>
+              <dd className="ml-0">Indemnités de transport (Article 35), avantages aux cadres (Article 36), tenue de travail (Article 37).</dd>
+              <dt className="font-medium text-foreground">Formation</dt>
+              <dd className="ml-0">Accès à la formation professionnelle continue.</dd>
+              <dt className="font-medium text-foreground">Traitement équitable</dt>
+              <dd className="ml-0">Évaluation équitable et impartiale des employés sans discrimination.</dd>
+            </dl>
+          </div>
         </CardContent>
       </Card>
 
@@ -333,29 +423,66 @@ export default function CompanyRatings() {
               {selectedCompanyId != null &&
                 entreprises.find((e) => e.id === selectedCompanyId)?.nom}
               . Donnez une note de 1 à 5 pour chaque critère (optionnel : commentaire).
+              La notation automatique est calculée à partir des requêtes clôturées (résolu / non résolu).
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
-            {CRITERES_NOTATION.map((c) => (
-              <div key={c.value} className="space-y-2">
-                <Label>{c.label}</Label>
-                <StarRating
-                  value={formNotes[c.value] ?? 0}
-                  onChange={(n) => setFormNotes((prev) => ({ ...prev, [c.value]: n }))}
-                />
-                <Textarea
-                  placeholder="Commentaire (optionnel)"
-                  value={formComments[c.value] ?? ''}
-                  onChange={(e) =>
-                    setFormComments((prev) => ({ ...prev, [c.value]: e.target.value }))
-                  }
-                  className="min-h-[60px] resize-none"
-                  rows={2}
-                />
+            <div>
+              <h4 className="text-sm font-semibold text-muted-foreground mb-3">1. Critères d&apos;évaluation des entreprises</h4>
+              <div className="space-y-4">
+                {CRITERES_NOTATION.filter((c) => c.section === 1).map((c) => (
+                  <div key={c.value} className="space-y-2">
+                    <Label>{c.label}</Label>
+                    <StarRating
+                      value={formNotes[c.value] ?? 0}
+                      onChange={(n) => setFormNotes((prev) => ({ ...prev, [c.value]: n }))}
+                    />
+                    <Textarea
+                      placeholder="Commentaire (optionnel)"
+                      value={formComments[c.value] ?? ''}
+                      onChange={(e) =>
+                        setFormComments((prev) => ({ ...prev, [c.value]: e.target.value }))
+                      }
+                      className="min-h-[60px] resize-none"
+                      rows={2}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-muted-foreground mb-3">2. Convention collective des Assurances</h4>
+              <div className="space-y-4">
+                {CRITERES_NOTATION.filter((c) => c.section === 2).map((c) => (
+                  <div key={c.value} className="space-y-2">
+                    <Label>{c.label}</Label>
+                    <StarRating
+                      value={formNotes[c.value] ?? 0}
+                      onChange={(n) => setFormNotes((prev) => ({ ...prev, [c.value]: n }))}
+                    />
+                    <Textarea
+                      placeholder="Commentaire (optionnel)"
+                      value={formComments[c.value] ?? ''}
+                      onChange={(e) =>
+                        setFormComments((prev) => ({ ...prev, [c.value]: e.target.value }))
+                      }
+                      className="min-h-[60px] resize-none"
+                      rows={2}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
           <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={applyNotationAutomatique}
+              className="mr-auto"
+            >
+              Utiliser la notation automatique
+            </Button>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Annuler
             </Button>

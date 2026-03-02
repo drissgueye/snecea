@@ -38,9 +38,9 @@ import { getRequetes, getEntreprises, type RequeteListDto, type EntrepriseDto } 
 import { ticketTypeLabels } from '@/lib/mock-data';
 import { statusLabels, urgencyLabels } from '@/lib/mock-data';
 
-const STATUT_CLOSED = ['resolved', 'closed'];
-const STATUS_KEYS = ['new', 'info_needed', 'processing', 'hr_escalated', 'hr_pending', 'resolved', 'closed'] as const;
-const COLORS = ['hsl(220, 70%, 50%)', 'hsl(160, 60%, 45%)', 'hsl(30, 80%, 55%)', 'hsl(280, 60%, 50%)', 'hsl(340, 70%, 50%)', 'hsl(200, 60%, 50%)', 'hsl(100, 50%, 45%)'];
+const STATUT_CLOSED = ['resolved', 'non_resolu', 'closed'];
+const STATUS_KEYS = ['new', 'info_needed', 'processing', 'hr_escalated', 'hr_pending', 'resolved', 'non_resolu', 'closed'] as const;
+const COLORS = ['hsl(220, 70%, 50%)', 'hsl(160, 60%, 45%)', 'hsl(30, 80%, 55%)', 'hsl(280, 60%, 50%)', 'hsl(340, 70%, 50%)', 'hsl(200, 60%, 50%)', 'hsl(100, 50%, 45%)', 'hsl(25, 95%, 44%)'];
 
 const MONTH_LABELS: Record<number, string> = {
   1: 'Jan', 2: 'Fév', 3: 'Mar', 4: 'Avr', 5: 'Mai', 6: 'Juin',
