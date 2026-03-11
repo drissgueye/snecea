@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api';
+const API_URL = import.meta.env.VITE_API_URL ?? 'https://backendsnecea.labdev-it.com/api';
 
 /** URL de base de l’API (pour diagnostic en dev). */
 export const getApiBaseUrl = () => API_URL;
